@@ -104,6 +104,7 @@ export class Game {
     // never sit inside a building. The Vantara by the warehouse is M2's target.
     this.parkedCars = [];
     const spots = [
+      ["pipit", 14, 108], // Mara's runaround, parked at the Voss Auto yard
       ["pipit", 36, -100], ["corto", -26, 48], ["cabrio", 222, -40],
       ["pipit", 250, 60], ["mule", -98, -48], ["corto", 36, -150],
       ["hauler", -88, 76], ["pipit", -150, 100], ["corto", 36, -186],
