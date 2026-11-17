@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>SOLMAR — Streets of Solmar</title>
+<script type="importmap">{"imports": {"three": "./vendor/three.min.js"}}</script>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1a1210; font-family: Arial, Helvetica, sans-serif; }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; }
+  .hidden { display: none !important; }
+  /* ---- HUD ---- */
+  #hud { position: fixed; inset: 0; pointer-events: none; color: #fff; z-index: 5; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+  #topbar { position: absolute; top: 14px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: flex-start; }
+  #money { font-size: 30px; font-weight: bold; color: #7dff8a; }
+  #clock { font-size: 20px; font-weight: bold; margin-top: 2px; }
+  #stars { font-size: 26px; letter-spacing: 3px; color: #ffd23c; text-align: right; }
+  #stars.hot { color: #ff3344; animation: blink 0.7s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .45; } }
+  #bars { position: absolute; left: 16px; bottom: 16px; width: 240px; }
+  .bar { height: 12px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.5); margin-top: 5px; }
+  .bar > div { height: 100%; }
+  #hp-fill { background: #37d67a; width: 100%; }
+  #armor-fill { background: #4aa8ff; width: 0%; }
+  #objective { position: absolute; top: 64px; left: 16px; font-size: 17px; font-weight: bold; background: rgba(0,0,0,.55); padding: 7px 12px; border-left: 4px solid #ffd23c; max-width: 520px; }
+  #speedo { position: absolute; right: 16px; bottom: 216px; font-size: 24px; font-weight: bold; background: rgba(0,0,0,.55); padding: 6px 12px; }
+  #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); font-size: 18px; font-weight: bold; background: rgba(0,0,0,.65); padding: 8px 16px; border: 1px solid #ffd23c; }
+  #toast { position: absolute; left: 50%; top: 22%; transform: translateX(-50%); font-size: 21px; font-weight: bold; background: rgba(0,0,0,.7); padding: 10px 20px; border-radius: 4px; }
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 26px; font-weight: bold; color: rgba(255,255,255,.9); }
+  #minimap { position: absolute; right: 16px; bottom: 16px; width: 200px; height: 200px; border: 2px solid rgba(255,255,255,.65); border-radius: 4px; background: #0d1b26; }
+  /* ---- Menus ---- */
+  .menu { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(20,8,16,.55), rgba(10,10,26,.72)); color: #fff; }
+  .panel { text-align: center; max-width: 640px; padding: 28px 40px; }
+  .panel h1 { font-size: 84px; margin: 0; letter-spacing: 8px; color: #ffd23c; text-shadow: 0 0 26px rgba(255,47,214,.65), 0 4px 0 rgba(0,0,0,.4); }
+  .panel h2 { font-size: 34px; margin: 0 0 10px; letter-spacing: 2px; }
+  .tagline { font-size: 19px; color: #ffd9a0; margin: 6px 0 4px; }
+  .story { font-size: 15px; line-height: 1.55; color: #e8e0d8; margin: 12px 0 20px; }
+  .features { font-size: 14px; color: #9fd8ff; margin: 16px 0 4px; letter-spacing: 1px; }
+  .menu-btn { display: block; width: 320px; margin: 9px auto; padding: 12px; font-size: 18px; font-weight: bold; color: #fff; background: rgba(255,47,214,.28); border: 2px solid #ff2fd6; border-radius: 4px; cursor: pointer; pointer-events: auto; }
+  .menu-btn:hover { background: rgba(255,47,214,.55); }
+  .menu-btn.secondary { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.5); }
+  .menu-btn.secondary:hover { background: rgba(255,255,255,.22); }
+  .controls-table { text-align: left; font-size: 16px; line-height: 1.9; margin: 10px auto; display: inline-block; }
+  .controls-table b { color: #ffd23c; display: inline-block; min-width: 130px; }
+  #mission-list { max-height: 300px; overflow-y: auto; }
+  #dead-title { font-size: 92px; color: #ff3344; letter-spacing: 6px; margin: 0; text-shadow: 0 0 30px rgba(255,0,0,.6); }
+  #stats, #end-stats { font-size: 16px; line-height: 1.8; color: #e8e0d8; margin: 14px 0; }
+  .credit { font-size: 12px; color: rgba(255,255,255,.55); margin-top: 18px; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud" class="hidden">
+  <div id="topbar">
+    <div><div id="money">$150</div><div id="clock">17:36</div></div>
+    <div id="stars">☆☆☆☆☆</div>
+  </div>
+  <div id="objective" class="hidden"></div>
+  <div id="bars">
+    <div class="bar"><div id="hp-fill"></div></div>
+    <div class="bar"><div id="armor-fill"></div></div>
+  </div>
+  <div id="speedo" class="hidden"></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="crosshair" class="hidden">+</div>
+  <canvas id="minimap" width="200" height="200"></canvas>
+</div>
+
+<div id="menu-start" class="menu">
+  <div class="panel">
+    <h1>SOLMAR</h1>
+    <div class="tagline">STREETS OF SOLMAR — an open-world crime story</div>
+    <div class="story">Mara Voss came home to a debt she never owed and a city that forgot her.
+      Take back her father's garage, steal the cars, outrun the Solmar PD, and make
+      Dario Kessler pay — across 5 story missions in a living, sun-soaked city.</div>
+    <button class="menu-btn" id="btn-continue" data-action="continue">Continue</button>
+    <button class="menu-btn" data-action="new">New Game</button>
+    <button class="menu-btn secondary" data-action="missions">Missions</button>
+    <button class="menu-btn secondary" data-action="controls">Controls</button>
+    <div class="features">5 MISSIONS &middot; 6 CARS &middot; WANTED SYSTEM &middot; TRAFFIC &amp; PEDESTRIANS &middot; MINIMAP &middot; SAVE</div>
+    <div class="credit">A fully original game. No assets, names or music from any commercial game. Press Enter to play.</div>
+  </div>
+</div>
+
+<div id="menu-pause" class="menu hidden">
+  <div class="panel">
+    <h2>PAUSED</h2>
+    <div id="stats"></div>
+    <button class="menu-btn" data-action="resume">Resume</button>
+    <button class="menu-btn secondary" data-action="save">Save game</button>
+    <button class="menu-btn secondary" data-action="missions">Missions</button>
+    <button class="menu-btn secondary" data-action="controls">Controls</button>
+    <button class="menu-btn secondary" data-action="quit">Quit to menu</button>
+  </div>
+</div>
+
+<div id="menu-missions" class="menu hidden">
+  <div class="panel">
+    <h2>MISSIONS</h2>
+    <div id="mission-list"></div>
+    <button class="menu-btn secondary" data-action="back-start">Back</button>
+  </div>
+</div>
+
+<div id="menu-controls" class="menu hidden">
+  <div class="panel">
+    <h2>CONTROLS</h2>
+    <div class="controls-table">
+      <div><b>W A S D</b> walk / drive</div>
+      <div><b>Shift</b> sprint &nbsp; <b>Space</b> jump / handbrake</div>
+      <div><b>Mouse</b> orbit camera &nbsp; <b>Click</b> punch / shoot</div>
+      <div><b>E</b> interact / steal car &nbsp; <b>F</b> enter / exit car</div>
+      <div><b>1 / 2 / 3</b> fists / pistol / shotgun</div>
+      <div><b>R</b> horn &nbsp; <b>M</b> mute &nbsp; <b>P / Esc</b> pause</div>
+    </div>
+    <button class="menu-btn secondary" data-action="back-start">Back</button>
+  </div>
+</div>
+
+<div id="menu-dead" class="menu hidden">
+  <div class="panel">
+    <h1 id="dead-title">WASTED</h1>
+    <div class="story" id="dead-sub"></div>
+    <button class="menu-btn" data-action="respawn">Get back up</button>
+  </div>
+</div>
+
+<div id="menu-end" class="menu hidden">
+  <div class="panel">
+    <h2 style="color:#7dff8a">SOLMAR IS YOURS</h2>
+    <div class="story">Kessler's empire is finished. The garage is yours, the city is yours,
+      and Mara Voss is free. Keep driving — free roam is open.</div>
+    <div id="end-stats"></div>
+    <button class="menu-btn" data-action="free-roam">Keep playing (free roam)</button>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
