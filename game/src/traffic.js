@@ -1,143 +1,80 @@
-// traffic.js — AI traffic cars. Each car drives along a street centre
-// line (x-streets or z-streets), keeps to the right-hand lane, slows for
-// the car ahead, and at intersections sometimes turns onto the cross
-// street. Traffic lights at the four central intersections gate flow.
-import * as THREE from "three";
-import { CONFIG } from "./config.js";
-import { makeRng, pick, range } from "./rng.js";
-import { createCar, carDef } from "./vehicles.js";
-import { nearestStreet } from "./city.js";
+// SOLMAR — traffic AI: mobil mengikuti jalan, berhenti di lampu merah, menghindar.
+import * as THREE from 'three';
+import { CFG } from './config.js';
+import { CARS, createVehicle } from './vehicles.js';
 
-const STREETS = CONFIG.streetOffsets;
-
-export class Traffic {
-  constructor(scene) {
-    this.scene = scene;
-    this.cars = [];
-    this.rng = makeRng(CONFIG.seed + 101);
-    // Traffic lights: state per central intersection, cycles on a timer.
-    this.lights = [];
-    for (const sx of [-31, 31]) {
-      for (const sz of [-31, 31]) {
-        this.lights.push({ x: sx, z: sz, t: this.rng() * 8, green: this.rng() < 0.5 });
-      }
-    }
-    this.lightMeshes = [];
-    for (const l of this.lights) {
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.12, 4.4, 6),
-        new THREE.MeshLambertMaterial({ color: 0x222222 }),
-      );
-      pole.position.set(l.x + 7.5, 2.2, l.z + 7.5);
-      scene.add(pole);
-      const lamp = new THREE.Mesh(
-        new THREE.SphereGeometry(0.5, 10, 8),
-        new THREE.MeshBasicMaterial({ color: 0x37d67a }),
-      );
-      lamp.position.set(l.x + 7.5, 4.6, l.z + 7.5);
-      scene.add(lamp);
-      this.lightMeshes.push(lamp);
-    }
+export function createTraffic(scene, city, rng) {
+  const cars = [];
+  for (let i = 0; i < CFG.trafficN; i++) {
+    const def = CARS[rng.int(0, CARS.length - 1)];
+    const p = city.roadPos(rng);
+    const axis = Math.abs(p.x - CFG.roadAt[0]) < 40 || rng.chance(0.5) ? 'z' : 'x';
+    const v = createVehicle(def, p.x, p.z, axis === 'z' ? 0 : Math.PI / 2);
+    v.speed = rng.range(8, 14);
+    v.dir = rng.chance(0.5) ? 1 : -1;
+    v.axis = axis;
+    v.lane = rng.pick([-2.5, 2.5]);
+    scene.add(v.mesh);
+    cars.push(v);
   }
-
-  spawnAll() {
-    const defs = CONFIG.cars.filter((c) => c.id !== "vantara");
-    for (let i = 0; i < CONFIG.trafficCount; i++) {
-      const alongX = this.rng() < 0.5;
-      const street = pick(this.rng, STREETS);
-      const along = range(this.rng, -180, 180);
-      const dir = this.rng() < 0.5 ? 1 : -1;
-      const lane = 3; // right-hand lane offset
-      const x = alongX ? along : street + dir * lane * -1;
-      const z = alongX ? street + dir * lane : along;
-      const def = pick(this.rng, defs);
-      const car = createCar(def, x, z, alongX ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI), { driver: "traffic" });
-      car.axis = alongX ? "x" : "z";
-      car.dir = dir;
-      car.street = street;
-      car.targetSpeed = range(this.rng, 8, CONFIG.trafficSpeed);
-      car.wait = 0;
-      this.scene.add(car.mesh);
-      this.cars.push(car);
-    }
+  // Lampu lalu lintas di persimpangan utama.
+  const lights = [];
+  for (const x of [-93, 31, 93]) for (const z of [-93, 31, 93]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 5, 6),
+      new THREE.MeshLambertMaterial({ color: 0x222222 }));
+    pole.position.set(x + 6, 2.5, z + 6); scene.add(pole);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x33ff55 }));
+    lamp.position.set(x + 6, 5.2, z + 6); scene.add(lamp);
+    lights.push({ x: x + 6, z: z + 6, lamp, t: rng.range(0, 8) });
   }
-
-  // Is a light red for a car approaching intersection (x,z) on its axis?
-  redLight(car) {
-    for (let i = 0; i < this.lights.length; i++) {
-      const l = this.lights[i];
-      const d = car.axis === "x" ? Math.abs(car.z - l.z) : Math.abs(car.x - l.x);
-      const along = car.axis === "x" ? car.x - l.x : car.z - l.z;
-      if (d < 7 && Math.abs(along) < 14 && Math.sign(along) === -car.dir) {
-        // Green for the axis whose index parity matches the light phase.
-        const greenForX = l.green;
-        if ((car.axis === "x") !== greenForX) return true;
-      }
-    }
-    return false;
-  }
-
-  update(dt) {
-    for (const l of this.lights) {
-      l.t += dt;
-      if (l.t > 8) { l.t = 0; l.green = !l.green; }
-    }
-    this.lightMeshes.forEach((m, i) => {
-      m.material.color.setHex(this.lights[i].green ? 0x37d67a : 0xff3a2a);
-    });
-
-    for (const car of this.cars) {
-      // Slow for the car ahead on the same street.
-      let ahead = 99;
-      for (const o of this.cars) {
-        if (o === car || o.axis !== car.axis || o.street !== car.street) continue;
-        const d = car.axis === "x" ? (o.x - car.x) * car.dir : (o.z - car.z) * car.dir;
-        if (d > 0 && d < ahead) ahead = d;
-      }
-      let want = car.targetSpeed;
-      if (ahead < 10) want = Math.min(want, Math.max(0, (ahead - 5) * 1.2));
-      if (this.redLight(car)) want = 0;
-      if (car.wait > 0) { car.wait -= dt; want = 0; }
-
-      car.speed += (want - car.speed) * Math.min(1, dt * 2);
-      const step = car.speed * dt;
-      if (car.axis === "x") car.x += step * car.dir;
-      else car.z += step * car.dir;
-
-      // Reached the city edge: turn around.
-      const pos = car.axis === "x" ? car.x : car.z;
-      if (Math.abs(pos) > 200) {
-        car.dir *= -1;
-        if (car.axis === "x") car.z = car.street - car.dir * 3;
-        else car.x = car.street - car.dir * 3;
-        car.heading = car.axis === "x" ? (car.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (car.dir > 0 ? 0 : Math.PI);
-      }
-
-      // At an intersection, sometimes turn onto the cross street.
-      const cross = nearestStreet(car.axis === "x" ? car.x : car.z);
-      const distToCross = Math.abs((car.axis === "x" ? car.x : car.z) - cross);
-      if (distToCross < 0.6 && this.rng() < 0.06 && Math.abs(car.speed) > 3) {
-        const newStreet = cross;
-        const newAxis = car.axis === "x" ? "z" : "x";
-        const newDir = this.rng() < 0.5 ? 1 : -1;
-        const oldStreet = car.street;
-        if (newAxis === "x") {
-          car.z = newStreet + newDir * 3;
-          car.x = oldStreet;
-        } else {
-          car.x = newStreet + newDir * 3;
-          car.z = oldStreet;
+  let lightClock = 0;
+  function update(dt, ctx) {
+    lightClock += dt;
+    const green = Math.floor(lightClock / 8) % 2 === 0;
+    for (const l of lights) l.lamp.material.color.setHex(green ? 0x33ff55 : 0xff3333);
+    for (const c of cars) {
+      // Lampu merah: berhenti sebelum persimpangan.
+      let stop = false;
+      if (!green) {
+        for (const l of lights) {
+          const d = c.axis === 'z'
+            ? Math.abs(c.x - (l.x - 6)) < 6 && Math.abs(c.z - l.z) < 14
+            : Math.abs(c.z - (l.z - 6)) < 6 && Math.abs(c.x - l.x) < 14;
+          if (d) { stop = true; break; }
         }
-        car.axis = newAxis;
-        car.dir = newDir;
-        car.street = newStreet;
-        car.heading = newAxis === "x" ? (newDir > 0 ? Math.PI / 2 : -Math.PI / 2) : (newDir > 0 ? 0 : Math.PI);
       }
-
-      car.mesh.position.set(car.x, 0, car.z);
-      car.mesh.rotation.y = car.heading + Math.PI;
-      const spin = (car.speed * dt) / 0.34;
-      for (const w of car.wheels) w.rotation.x += spin;
+      // Mobil di depan terlalu dekat: pelan.
+      let slow = false;
+      for (const o of cars) {
+        if (o === c || o.axis !== c.axis) continue;
+        const along = c.axis === 'z' ? (o.z - c.z) * c.dir : (o.x - c.x) * c.dir;
+        const side = c.axis === 'z' ? Math.abs(o.x - c.x) : Math.abs(o.z - c.z);
+        if (along > 0 && along < 9 && side < 4) { slow = true; break; }
+      }
+      const target = stop ? 0 : slow ? 5 : c.speed;
+      c.cur = (c.cur ?? c.speed) + (target - (c.cur ?? c.speed)) * Math.min(1, dt * 2);
+      const step = c.cur * dt;
+      if (c.axis === 'z') {
+        c.z += step * c.dir;
+        if (c.z > 185) { c.z = -185; }
+        if (c.z < -185) { c.z = 185; }
+      } else {
+        c.x += step * c.dir;
+        if (c.x > 185) { c.x = -185; }
+        if (c.x < -185) { c.x = 185; }
+      }
+      // Jaga di jalurnya (snap halus ke lajur).
+      const road = CFG.roadAt.reduce((a, r) => {
+        const d = c.axis === 'z' ? Math.abs(r - c.x) : Math.abs(r - c.z);
+        const ad = c.axis === 'z' ? Math.abs(a - c.x) : Math.abs(a - c.z);
+        return d < ad ? r : a;
+      }, CFG.roadAt[0]);
+      if (c.axis === 'z') c.x += (road + c.lane - c.x) * Math.min(1, dt * 1.5);
+      else c.z += (road + c.lane - c.z) * Math.min(1, dt * 1.5);
+      c.mesh.position.set(c.x, 0, c.z);
+      c.mesh.rotation.y = c.axis === 'z' ? (c.dir > 0 ? 0 : Math.PI) : (c.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     }
   }
+  return { cars, update };
 }

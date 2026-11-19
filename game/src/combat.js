@@ -1,181 +1,139 @@
-// combat.js — fists, pistol, shotgun and the Kessler guards who shoot
-// back. Shooting is a ray test against guards and police cars; guards
-// are simple state machines (idle / chase / shoot / dead) with a
-// fall-over death. The player takes damage through the game callback,
-// which owns health, armor, the vignette and the WASTED screen.
-import * as THREE from "three";
-import { CONFIG } from "./config.js";
-import { makeRng, pick } from "./rng.js";
+// SOLMAR — combat: tinju/pistol/shotgun/SMG, guard AI Kessler, health/armor.
+import * as THREE from 'three';
 
-export const WEAPONS = {
-  fists: { name: "Fists", damage: CONFIG.punchDamage, range: 2.4, rate: 0.45, auto: false },
-  pistol: { name: "Pistol", damage: CONFIG.pistolDamage, range: 55, rate: 0.28, auto: false },
-  shotgun: { name: "Shotgun", damage: CONFIG.shotgunDamage, range: 26, rate: 0.9, auto: false, pellets: 6, spread: 0.09 },
+const WEAPONS = {
+  fists: { name: 'Fists', dmg: 12, rate: 2.2, range: 2.6, mag: Infinity, auto: false },
+  pistol: { name: 'Pistol', dmg: 20, rate: 3.5, range: 42, mag: 12, auto: false },
+  shotgun: { name: 'Shotgun', dmg: 15, rate: 1.1, range: 20, mag: 6, auto: false, pellets: 5 },
+  smg: { name: 'SMG', dmg: 11, rate: 9, range: 34, mag: 30, auto: true },
 };
 
-export class Combat {
-  constructor(scene) {
-    this.scene = scene;
-    this.rng = makeRng(CONFIG.seed + 404);
-    this.weapon = "fists";
-    this.ammo = { pistol: 48, shotgun: 18 };
-    this.cooldown = 0;
-    this.guards = [];
-    this.tracers = [];
-  }
-
-  hasWeapon(id) {
-    if (id === "fists") return true;
-    return (this.ammo[id] ?? 0) > 0 || id === "pistol" && this.unlockedPistol;
-  }
-
-  unlock(id) {
-    if (id === "pistol") this.unlockedPistol = true;
-    if (id === "shotgun") this.unlockedShotgun = true;
-  }
-
-  select(id) {
-    if (id === "fists") this.weapon = "fists";
-    if (id === "pistol" && this.unlockedPistol) this.weapon = "pistol";
-    if (id === "shotgun" && this.unlockedShotgun) this.weapon = "shotgun";
-  }
-
-  spawnGuard(x, z) {
+export function createCombat(scene, ctx) {
+  const c = {
+    weapons: WEAPONS, current: 'fists', ammo: 12, cooldown: 0,
+    guards: [], tracers: [],
+  };
+  const guardGeo = new THREE.BoxGeometry(0.8, 1.15, 0.45);
+  const guardHead = new THREE.SphereGeometry(0.33, 8, 8);
+  function spawnGuard(x, z, opts = {}) {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.34, 0.4, 1.0, 10),
-      new THREE.MeshLambertMaterial({ color: 0x3a3a3a }),
-    );
-    body.position.y = 1.0;
-    body.castShadow = true;
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.26, 10, 8),
-      new THREE.MeshLambertMaterial({ color: 0xd8a888 }),
-    );
-    head.position.y = 1.78;
-    const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.28, 0.28, 0.12, 10),
-      new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
-    );
-    cap.position.y = 1.98;
-    const gun = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.1, 0.7),
-      new THREE.MeshLambertMaterial({ color: 0x111111 }),
-    );
-    gun.position.set(0.3, 1.3, -0.4);
-    g.add(body, head, cap, gun);
+    const body = new THREE.Mesh(guardGeo, new THREE.MeshLambertMaterial({ color: opts.boss ? 0x8a1a1a : 0x3a3a3a }));
+    body.position.y = 1.2; g.add(body);
+    const head = new THREE.Mesh(guardHead, new THREE.MeshLambertMaterial({ color: 0xc9a184 }));
+    head.position.y = 2.0; g.add(head);
+    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.6),
+      new THREE.MeshLambertMaterial({ color: 0x111111 }));
+    gun.position.set(0.45, 1.3, 0.3); g.add(gun);
     g.position.set(x, 0, z);
-    this.scene.add(g);
-    const guard = { mesh: g, x, z, health: CONFIG.guardHealth, state: "idle", shootCd: 0, dead: false, fallT: 0 };
-    this.guards.push(guard);
+    scene.add(g);
+    const guard = {
+      mesh: g, x, z, hp: opts.hp || 60, speed: opts.speed || 3.4,
+      dmg: opts.dmg || 8, shootT: 0, boss: !!opts.boss, name: opts.name || 'Guard',
+    };
+    c.guards.push(guard);
     return guard;
   }
-
-  clearGuards() {
-    for (const g of this.guards) this.scene.remove(g.mesh);
-    this.guards = [];
+  function damageGuard(guard, n) {
+    guard.hp -= n;
+    ctx.effects?.flash(guard.x, 1.4, guard.z);
+    if (guard.hp <= 0) {
+      guard.mesh.rotation.x = Math.PI / 2;
+      guard.mesh.position.y = 0.4;
+      guard.dead = true;
+      ctx.effects?.smoke(guard.x, guard.z);
+      return true;
+    }
+    return false;
   }
-
-  // Fire the current weapon from (ox,oy,oz) along direction (dx,dz).
-  // ctx: { guards, policeCars, trafficCars, effects, audio, onHitGuard,
-  //   onKillGuard, onWanted, cameraForward }.
-  fire(ox, oy, oz, dx, dz, ctx) {
-    if (this.cooldown > 0) return false;
-    const w = WEAPONS[this.weapon];
-    if (this.weapon !== "fists" && (this.ammo[this.weapon] ?? 0) <= 0) {
-      ctx.audio?.click();
-      this.cooldown = 0.3;
-      return false;
-    }
-    this.cooldown = w.rate;
-    if (this.weapon !== "fists") this.ammo[this.weapon]--;
-    ctx.audio?.shoot(this.weapon);
-    ctx.effects?.muzzle(ox + dx * 1.2, oy, oz + dz * 1.2);
-
-    const pellets = w.pellets ?? 1;
-    for (let i = 0; i < pellets; i++) {
-      const spread = w.spread ? (this.rng() - 0.5) * 2 * w.spread : 0;
-      const px = dx * Math.cos(spread) - dz * Math.sin(spread);
-      const pz = dx * Math.sin(spread) + dz * Math.cos(spread);
-      this.rayHit(ox, oz, px, pz, w, ctx);
-    }
-    return true;
-  }
-
-  rayHit(ox, oz, dx, dz, w, ctx) {
-    // Nearest guard hit along the ray (2D, generous radius).
-    let best = null;
-    let bestD = w.range;
-    for (const g of this.guards) {
-      if (g.dead) continue;
-      const rx = g.x - ox;
-      const rz = g.z - oz;
-      const along = rx * dx + rz * dz;
-      if (along < 0 || along > bestD) continue;
-      const perp = Math.abs(rx * dz - rz * dx);
-      if (perp < 1.1) { best = g; bestD = along; }
-    }
-    if (best) {
-      best.health -= w.damage;
-      ctx.effects?.blood(best.x, 1.2, best.z);
-      if (best.health <= 0) {
-        best.dead = true;
-        best.fallT = 0;
-        ctx.onKillGuard?.(best);
-      } else {
-        ctx.onHitGuard?.(best);
+  function shoot() {
+    if (c.cooldown > 0) return;
+    const w = WEAPONS[c.current];
+    const up = ctx.upgrades;
+    const dmgMul = (up?.has('w_dmg') ? 1.35 : 1) * (up?.has('w_armor_pierce') ? 1.15 : 1);
+    const rateMul = up?.has('w_rate') ? 1.3 : 1;
+    c.cooldown = 1 / (w.rate * rateMul);
+    const p = ctx.player;
+    if (c.current === 'fists') {
+      ctx.audio?.shot('punch');
+      for (const gd of c.guards) {
+        if (!gd.dead && Math.hypot(gd.x - p.x, gd.z - p.z) < w.range) damageGuard(gd, w.dmg * dmgMul);
       }
+      const boss = ctx.bosses?.active;
+      if (boss && boss.hp > 0 && Math.hypot(boss.x - p.x, boss.z - p.z) < w.range + 1) ctx.bosses.damage(boss, w.dmg * dmgMul);
       return;
     }
-    // Police cars can be shot too (raises wanted).
-    for (const c of ctx.policeCars ?? []) {
-      const rx = c.x - ox;
-      const rz = c.z - oz;
-      const along = rx * dx + rz * dz;
-      if (along < 0 || along > w.range) continue;
-      if (Math.abs(rx * dz - rz * dx) < 1.8) {
-        c.damaged = Math.min(1, (c.damaged ?? 0) + 0.25);
-        ctx.effects?.sparks(c.x, 1, c.z);
-        ctx.onWanted?.(CONFIG.shootWanted);
-        return;
+    if (c.ammo <= 0) { ctx.audio?.shot('dry'); ctx.hud?.toast('RELOAD — press R'); return; }
+    c.ammo--;
+    ctx.audio?.shot(c.current);
+    ctx.effects?.flash(p.x + Math.sin(p.angle) * 1.2, 1.4, p.z + Math.cos(p.angle) * 1.2);
+    const pellets = w.pellets || 1;
+    for (let i = 0; i < pellets; i++) {
+      const a = p.angle + (Math.random() - 0.5) * (w.pellets ? 0.24 : 0.03);
+      const dx = Math.sin(a), dz = Math.cos(a);
+      let best = null, bd = w.range;
+      for (const gd of c.guards) {
+        if (gd.dead) continue;
+        const gx = gd.x - p.x, gz = gd.z - p.z;
+        const along = gx * dx + gz * dz;
+        const perp = Math.abs(gx * dz - gz * dx);
+        if (along > 0 && along < bd && perp < 1.4) { bd = along; best = gd; }
       }
-    }
-  }
-
-  punchTarget(ox, oz, dx, dz, ctx) {
-    return this.fire(ox, 1.2, oz, dx, dz, ctx);
-  }
-
-  update(dt, ctx) {
-    this.cooldown = Math.max(0, this.cooldown - dt);
-    for (const g of this.guards) {
-      if (g.dead) {
-        g.fallT += dt;
-        g.mesh.rotation.x = Math.min(Math.PI / 2, g.fallT * 4);
-        if (g.fallT > 6) g.mesh.visible = false;
-        continue;
-      }
-      const dx = ctx.playerX - g.x;
-      const dz = ctx.playerZ - g.z;
-      const d = Math.hypot(dx, dz);
-      g.shootCd -= dt;
-      if (d < 34) {
-        g.state = "shoot";
-        g.mesh.rotation.y = Math.atan2(dx, dz);
-        if (d > 8) {
-          g.x += (dx / d) * 3.4 * dt;
-          g.z += (dz / d) * 3.4 * dt;
-        }
-        if (g.shootCd <= 0 && d < 30) {
-          g.shootCd = 1.4 + this.rng() * 0.8;
-          ctx.audio?.enemyShot();
-          ctx.effects?.tracer(g.x, 1.3, g.z, ctx.playerX, 1.2, ctx.playerZ);
-          if (this.rng() < 0.55) ctx.onPlayerDamage?.(CONFIG.guardDamage);
+      if (best) {
+        if (damageGuard(best, w.dmg * dmgMul)) {
+          ctx.economy?.add(25, 'guard down');
+          ctx.police?.addHeat(1, 'kill');
         }
       } else {
-        g.state = "idle";
+        // Boss aktif juga bisa ditembak (ray test yang sama, target lebih besar).
+        const boss = ctx.bosses?.active;
+        if (boss && boss.hp > 0) {
+          const gx = boss.x - p.x, gz = boss.z - p.z;
+          const along = gx * dx + gz * dz;
+          const perp = Math.abs(gx * dz - gz * dx);
+          if (along > 0 && along < w.range && perp < 2.2) ctx.bosses.damage(boss, w.dmg * dmgMul);
+        }
       }
-      g.mesh.position.set(g.x, 0, g.z);
     }
+    if (ctx.police) ctx.police.addHeat(0, 'shot'); // tembakan terdengar
+    ctx.dangerPos = { x: p.x, z: p.z };
   }
+  function reload() {
+    const w = WEAPONS[c.current];
+    const mag = w.mag * (ctx.upgrades?.has('w_mag') ? 1.6 : 1);
+    c.ammo = mag;
+    ctx.audio?.sting('reload');
+  }
+  function giveWeapon(key) {
+    c.current = key;
+    const w = WEAPONS[key];
+    c.ammo = w.mag * (ctx.upgrades?.has('w_mag') ? 1.6 : 1);
+    ctx.player.mesh.getObjectByName('gun').visible = key !== 'fists';
+  }
+  function update(dt) {
+    c.cooldown = Math.max(0, c.cooldown - dt);
+    const p = ctx.player;
+    for (const gd of [...c.guards]) {
+      if (gd.dead) continue;
+      const dx = p.x - gd.x, dz = p.z - gd.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 46) continue;
+      const sp = gd.speed * (dist > 14 ? 1 : 0.4);
+      gd.x += (dx / dist) * sp * dt;
+      gd.z += (dz / dist) * sp * dt;
+      gd.mesh.position.set(gd.x, 0, gd.z);
+      gd.mesh.rotation.y = Math.atan2(dx, dz);
+      gd.shootT -= dt;
+      if (dist < 30 && gd.shootT <= 0) {
+        gd.shootT = 1.4;
+        ctx.audio?.shot('enemy');
+        ctx.effects?.flash(gd.x, 1.4, gd.z);
+        if (Math.random() < 0.55 && p.hurt(gd.dmg)) ctx.onWasted?.();
+      }
+    }
+    // Bersihkan guard mati yang jauh.
+    c.guards = c.guards.filter((gd) => !gd.dead || Math.hypot(gd.x - p.x, gd.z - p.z) < 60);
+  }
+  c.spawnGuard = spawnGuard; c.shoot = shoot; c.reload = reload;
+  c.giveWeapon = giveWeapon; c.update = update; c.damageGuard = damageGuard;
+  return c;
 }

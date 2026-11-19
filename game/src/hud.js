@@ -1,174 +1,96 @@
-// hud.js — the DOM HUD, the 2D minimap, toasts and menus. The 3D world
-// never draws UI itself: this module owns every pixel of interface so
-// the screenshots show the full HUD, minimap and objective at a glance.
-import { CONFIG } from "./config.js";
+// SOLMAR — HUD: uang/health/wanted/jam/objective, minimap canvas, boss bar, menu.
+import { CFG } from './config.js';
 
-const $ = (id) => document.getElementById(id);
-
-export class Hud {
-  constructor() {
-    this.minimap = $("minimap").getContext("2d");
-    this.toastTimer = null;
-    this.starFlash = 0;
+export function createHud(ctx) {
+  const $ = (id) => document.getElementById(id);
+  const h = { waypoint: null, boss: null, toastT: 0 };
+  const mm = $('minimap');
+  const mmc = mm?.getContext('2d');
+  function setObjective(t) { const el = $('objective'); if (el) el.textContent = t; }
+  function setWaypoint(w) { h.waypoint = w; }
+  function toast(msg) {
+    const el = $('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.style.opacity = '1';
+    h.toastT = 4;
   }
-
-  fmtMoney(n) {
-    return n.toLocaleString("en-US");
+  function bossBar(boss) {
+    h.boss = boss;
+    const bar = $('bossbar');
+    if (!bar) return;
+    if (!boss) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    $('bossname').textContent = `${boss.def.name} — ${boss.def.title} (Phase ${boss.phase}/3)`;
+    $('bossfill').style.width = `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%`;
   }
-
-  fmtClock(minutes) {
-    const h = Math.floor(minutes / 60) % 24;
-    const m = Math.floor(minutes % 60);
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-
-  update(s) {
-    $("money").textContent = this.fmtMoney(s.money);
-    $("mission-name").textContent = s.missionName ?? "FREE ROAM";
-    $("objective").textContent = s.objective;
-    const stars = $("stars");
-    let str = "";
-    for (let i = 0; i < 5; i++) str += i < s.stars ? "★" : "☆";
-    stars.textContent = str;
-    stars.className = "stars" + (s.stars === 0 ? " dim" : "");
-    if (s.blink) stars.style.opacity = Math.floor(performance.now() / 400) % 2 ? "0.35" : "1";
-    else stars.style.opacity = "1";
-    $("clock").textContent = this.fmtClock(s.clockMinutes);
-    $("health-fill").style.width = `${Math.max(0, s.health)}%`;
-    $("armor-fill").style.width = `${Math.max(0, s.armor)}%`;
-    $("vignette").style.display = s.health < 35 ? "block" : "none";
-    const speedo = $("speedo");
-    if (s.inCar) {
-      speedo.style.display = "block";
-      $("speed").textContent = Math.round(Math.abs(s.speedKmh));
-      $("car-name").textContent = `${s.carName}${s.damaged > 0.5 ? " — SMOKING" : ""}`;
-    } else {
-      speedo.style.display = "none";
+  function flashMoney() { const el = $('money'); if (el) el.style.color = '#7cff5a'; setTimeout(() => { if (el) el.style.color = ''; }, 300); }
+  function drawMinimap() {
+    if (!mmc) return;
+    const S = 150, sc = S / 420;
+    mmc.clearRect(0, 0, S, S);
+    mmc.fillStyle = 'rgba(10,16,24,0.85)'; mmc.fillRect(0, 0, S, S);
+    // Laut + pantai.
+    mmc.fillStyle = '#1e6f8e'; mmc.fillRect(0, (200 + 210) * sc, S, S);
+    // Jalan.
+    mmc.strokeStyle = '#5a6068'; mmc.lineWidth = 4;
+    for (const r of CFG.roadAt) {
+      mmc.beginPath(); mmc.moveTo((r + 210) * sc, 0); mmc.lineTo((r + 210) * sc, S); mmc.stroke();
+      mmc.beginPath(); mmc.moveTo(0, (r + 210) * sc); mmc.lineTo(S, (r + 210) * sc); mmc.stroke();
     }
-    const prompt = $("prompt");
-    if (s.prompt) {
-      prompt.style.display = "block";
-      prompt.textContent = s.prompt;
-    } else {
-      prompt.style.display = "none";
+    // Waypoint.
+    if (h.waypoint) {
+      mmc.fillStyle = '#ffd24d';
+      mmc.beginPath();
+      mmc.arc((h.waypoint.x + 210) * sc, (h.waypoint.z + 210) * sc, 5, 0, 7);
+      mmc.fill();
     }
-    $("crosshair").style.display = s.aiming ? "block" : "none";
-    this.drawMinimap(s);
-  }
-
-  drawMinimap(s) {
-    const g = this.minimap;
-    const W = 208;
-    const scale = W / (CONFIG.worldHalf * 2 + 20);
-    const toMap = (x, z) => [(x + CONFIG.worldHalf + 10) * scale, (z + CONFIG.worldHalf + 10) * scale];
-    g.clearRect(0, 0, W, W);
-    g.fillStyle = "#0d1b2a";
-    g.fillRect(0, 0, W, W);
-    // Sea + beach (north = top).
-    g.fillStyle = "#1d7f9e";
-    g.fillRect(0, 0, W, 10);
-    g.fillStyle = "#e8cf9a";
-    g.fillRect(0, 10, W, 4);
-    // Roads.
-    g.strokeStyle = "#5a5a66";
-    g.lineWidth = 4;
-    for (const sOff of CONFIG.streetOffsets) {
-      const [x1, y1] = toMap(sOff, -CONFIG.worldHalf);
-      const [x2, y2] = toMap(sOff, CONFIG.worldHalf);
-      g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
-      const [ax, ay] = toMap(-CONFIG.worldHalf, sOff);
-      const [bx, by] = toMap(CONFIG.worldHalf, sOff);
-      g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+    // Polisi (biru) + player (panah putih).
+    const p = ctx.player;
+    mmc.fillStyle = '#4da6ff';
+    for (const u of ctx.police?.units || []) {
+      mmc.beginPath(); mmc.arc((u.v.x + 210) * sc, (u.v.z + 210) * sc, 3, 0, 7); mmc.fill();
     }
-    // Sun coins.
-    g.fillStyle = "#ffd23e";
-    for (const [x, z] of CONFIG.sunCoins) {
-      const [mx, my] = toMap(x, z);
-      g.beginPath(); g.arc(mx, my, 2, 0, Math.PI * 2); g.fill();
+    mmc.save();
+    mmc.translate((p.x + 210) * sc, (p.z + 210) * sc);
+    mmc.rotate(p.angle || 0);
+    mmc.fillStyle = '#ffffff';
+    mmc.beginPath(); mmc.moveTo(0, -6); mmc.lineTo(4, 5); mmc.lineTo(-4, 5); mmc.closePath(); mmc.fill();
+    mmc.restore();
+  }
+  function update(dt) {
+    const p = ctx.player;
+    const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+    set('money', `$${ctx.economy?.money ?? 0}`);
+    set('health', `HP ${Math.ceil(p.health)}${p.armor > 0 ? ` | ARMOR ${Math.ceil(p.armor)}` : ''}`);
+    set('speed', ctx.driving?.vehicle ? `${Math.round(Math.abs(ctx.driving.vehicle.speed) * 3.6)} km/h — ${ctx.driving.vehicle.def.name}` : 'On foot');
+    // Wanted stars.
+    const w = $('wanted');
+    if (w) {
+      w.textContent = '★'.repeat(ctx.police?.wanted || 0) + '☆'.repeat(5 - (ctx.police?.wanted || 0));
+      w.style.color = (ctx.police?.wanted || 0) >= 3 ? '#ff4444' : '#ffd24d';
     }
-    // Waypoint (blinking yellow).
-    if (s.waypoint) {
-      const [mx, my] = toMap(s.waypoint[0], s.waypoint[1]);
-      g.fillStyle = Math.floor(performance.now() / 300) % 2 ? "#ffd23e" : "#ffffff";
-      g.beginPath(); g.arc(mx, my, 5, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = "#ffd23e";
-      g.beginPath(); g.arc(mx, my, 8, 0, Math.PI * 2); g.stroke();
+    // Jam kota + fase hari + radio.
+    const t = ctx.atmosphere?.clock ?? 18;
+    const hh = Math.floor(t) % 24, mm2 = Math.floor((t % 1) * 60);
+    set('clock', `${String(hh).padStart(2, '0')}:${String(mm2).padStart(2, '0')} — ${ctx.atmosphere?.phaseName || 'Golden Hour'}`);
+    set('radio', `♪ ${ctx.audio?.radioName() || 'Solmar FM'}`);
+    // Misi + cred + relic.
+    const m = ctx.missions;
+    set('missionline', m?.active >= 0 ? `${m.defs[m.active].name} (${m.step + 1}/${m.defs[m.active].steps.length})` : 'Free Roam');
+    set('credline', `Cred: ${ctx.upgrades?.CRED_RANKS?.[ctx.upgrades?.rank?.() ?? 0] || 'Rookie'} (${ctx.upgrades?.cred ?? 0}) • Relics ${ctx.upgrades?.relicsFound?.size ?? 0}/12 • Coins ${ctx.economy?.coins ?? 0}/10`);
+    if (h.toastT > 0) { h.toastT -= dt; if (h.toastT <= 0) { const el = $('toast'); if (el) el.style.opacity = '0'; } }
+    drawMinimap();
+  }
+  function showMenu(name) {
+    for (const id of ['menu-start', 'menu-pause', 'menu-missions', 'menu-upgrades', 'menu-dead']) {
+      const el = $(id);
+      if (el) el.style.display = id === `menu-${name}` ? 'block' : 'none';
     }
-    // Police (red/blue dots).
-    for (const [x, z] of s.policeDots ?? []) {
-      const [mx, my] = toMap(x, z);
-      g.fillStyle = "#ff3a2a";
-      g.beginPath(); g.arc(mx, my, 3, 0, Math.PI * 2); g.fill();
-    }
-    // Player arrow.
-    const [px, py] = toMap(s.playerX, s.playerZ);
-    g.save();
-    g.translate(px, py);
-    g.rotate(s.playerHeading);
-    g.fillStyle = "#ffffff";
-    g.strokeStyle = "#000000";
-    g.beginPath();
-    g.moveTo(0, -7); g.lineTo(5, 6); g.lineTo(0, 3); g.lineTo(-5, 6); g.closePath();
-    g.fill(); g.stroke();
-    g.restore();
+    const hud = $('hud');
+    if (hud) hud.style.display = name === 'none' ? 'block' : 'none';
   }
-
-  toast(text, ms = 3600) {
-    const el = $("toast");
-    el.textContent = text;
-    el.style.display = "block";
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => { el.style.display = "none"; }, ms);
-  }
-
-  showStart(hasSave, missionListHtml) {
-    $("start-menu").classList.remove("hidden");
-    $("pause-menu").classList.add("hidden");
-    $("end-screen").classList.add("hidden");
-    $("btn-continue").disabled = !hasSave;
-    $("mission-list").innerHTML = missionListHtml;
-  }
-
-  hideMenus() {
-    $("start-menu").classList.add("hidden");
-    $("pause-menu").classList.add("hidden");
-    $("end-screen").classList.add("hidden");
-  }
-
-  showPause(statsHtml) {
-    $("pause-stats").innerHTML = statsHtml;
-    $("pause-menu").classList.remove("hidden");
-  }
-
-  hidePause() {
-    $("pause-menu").classList.add("hidden");
-  }
-
-  showEnd(kind, text) {
-    const el = $("end-screen");
-    el.classList.remove("hidden", "busted", "wasted");
-    el.classList.add(kind);
-    $("end-title").textContent = kind === "busted" ? "BUSTED" : "WASTED";
-    $("end-text").textContent = text;
-  }
-
-  bind(handlers) {
-    $("btn-new").onclick = () => handlers.newGame();
-    $("btn-continue").onclick = () => handlers.continueGame();
-    $("btn-resume").onclick = () => handlers.resume();
-    $("btn-save").onclick = () => handlers.save();
-    $("btn-quit").onclick = () => handlers.quitToMenu();
-    $("btn-retry").onclick = () => handlers.retry();
-    $("btn-end-menu").onclick = () => handlers.quitToMenu();
-    $("btn-missions").onclick = () => {
-      const m = $("mission-list");
-      m.style.display = m.style.display === "none" ? "block" : "none";
-      $("controls-list").style.display = "none";
-    };
-    $("btn-controls").onclick = () => {
-      const c = $("controls-list");
-      c.style.display = c.style.display === "none" ? "block" : "none";
-      $("mission-list").style.display = "none";
-    };
-  }
+  h.setObjective = setObjective; h.setWaypoint = setWaypoint; h.toast = toast;
+  h.bossBar = bossBar; h.flashMoney = flashMoney; h.update = update; h.showMenu = showMenu;
+  return h;
 }

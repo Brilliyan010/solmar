@@ -1,130 +1,67 @@
-// player.js — Mara Voss on foot: third-person movement, sprint, jump,
-// mouse-orbit camera, and the player mesh. Camera is a chase camera
-// that orbits with the mouse and pulls in when a wall is behind it.
-import * as THREE from "three";
-import { CONFIG } from "./config.js";
-import { collideCircle } from "./driving.js";
+// SOLMAR — Mara Voss jalan kaki: third-person, WASD + Shift + Space, kamera orbit.
+import * as THREE from 'three';
+import { CFG } from './config.js';
 
-export class Player {
-  constructor(scene) {
-    this.scene = scene;
-    this.x = 56;
-    this.z = 132;
-    this.y = 0;
-    this.vy = 0;
-    this.heading = Math.PI; // facing north, toward the garage
-    this.camYaw = Math.PI;
-    this.camPitch = 0.32;
-    this.camDist = 7;
-    this.onGround = true;
-    this.walkPhase = 0;
-    this.moving = false;
-
-    const g = new THREE.Group();
-    // Coral jacket, dark hair, jeans — Mara's look.
-    const jacket = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10),
-      new THREE.MeshLambertMaterial({ color: 0xe2574c }),
-    );
-    jacket.position.y = 1.05;
-    jacket.castShadow = true;
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(0.27, 12, 10),
-      new THREE.MeshLambertMaterial({ color: 0xe8b88a }),
-    );
-    head.position.y = 1.78;
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.29, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
-      new THREE.MeshLambertMaterial({ color: 0x2a1a12 }),
-    );
-    hair.position.y = 1.84;
-    const legL = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.62, 0.18),
-      new THREE.MeshLambertMaterial({ color: 0x2a3a5a }),
-    );
-    legL.position.set(-0.15, 0.31, 0);
-    const legR = legL.clone();
-    legR.position.x = 0.15;
-    const armL = new THREE.Mesh(
-      new THREE.BoxGeometry(0.13, 0.6, 0.13),
-      new THREE.MeshLambertMaterial({ color: 0xe2574c }),
-    );
-    armL.position.set(-0.48, 1.15, 0);
-    const armR = armL.clone();
-    armR.position.x = 0.48;
-    g.add(jacket, head, hair, legL, legR, armL, armR);
-    g.position.set(this.x, 0, this.z);
-    scene.add(g);
-    this.mesh = g;
-    this.legs = [legL, legR];
-    this.arms = [armL, armR];
-  }
-
-  update(dt, input, colliders, camera) {
-    // Mouse orbit.
-    this.camYaw -= input.mouseDX * 0.0032;
-    this.camPitch = Math.max(-0.1, Math.min(1.1, this.camPitch + input.mouseDY * 0.0024));
-
-    const k = input.keys;
-    let fx = 0;
-    let fz = 0;
-    if (k.has("KeyW")) fz -= 1;
-    if (k.has("KeyS")) fz += 1;
-    if (k.has("KeyA")) fx -= 1;
-    if (k.has("KeyD")) fx += 1;
-    const len = Math.hypot(fx, fz);
-    this.moving = len > 0;
-    const sprint = k.has("ShiftLeft") || k.has("ShiftRight");
-    const speed = sprint ? CONFIG.sprintSpeed : CONFIG.walkSpeed;
+export function createPlayer(scene, city) {
+  const g = new THREE.Group();
+  const jacket = new THREE.MeshLambertMaterial({ color: 0x1f6f5c });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.15, 0.45), jacket);
+  body.position.y = 1.2; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 10),
+    new THREE.MeshLambertMaterial({ color: 0xd9a986 }));
+  head.position.y = 2.0; g.add(head);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 10, 0, Math.PI * 2, 0, 1.4),
+    new THREE.MeshLambertMaterial({ color: 0x2a1a0e }));
+  hair.position.y = 2.05; g.add(hair);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.85, 0.4),
+    new THREE.MeshLambertMaterial({ color: 0x24344a }));
+  legs.position.y = 0.42; g.add(legs);
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5),
+    new THREE.MeshLambertMaterial({ color: 0x111111 }));
+  gun.position.set(0.5, 1.25, 0.2); gun.name = 'gun'; gun.visible = false; g.add(gun);
+  scene.add(g);
+  const p = {
+    mesh: g, x: 14, z: 110, y: 0, vy: 0, angle: Math.PI, camYaw: Math.PI,
+    health: CFG.maxHp, armor: 0, onGround: true, moving: false,
+  };
+  function update(dt, input, ctx) {
+    const sprintMul = ctx.upgrades?.has('m_sprint') ? 1.25 : 1;
+    const speed = (input.shift ? CFG.sprint : CFG.walk) * sprintMul;
+    let mx = 0, mz = 0;
+    if (input.w) { mx -= Math.sin(p.camYaw); mz -= Math.cos(p.camYaw); }
+    if (input.s) { mx += Math.sin(p.camYaw); mz += Math.cos(p.camYaw); }
+    if (input.a) { mx -= Math.cos(p.camYaw); mz += Math.sin(p.camYaw); }
+    if (input.d) { mx += Math.cos(p.camYaw); mz -= Math.sin(p.camYaw); }
+    const len = Math.hypot(mx, mz);
+    p.moving = len > 0;
     if (len > 0) {
-      fx /= len;
-      fz /= len;
-      const sin = Math.sin(this.camYaw);
-      const cos = Math.cos(this.camYaw);
-      const mx = fx * cos - fz * sin;
-      const mz = fx * sin + fz * cos;
-      const nx = this.x + mx * speed * dt;
-      const nz = this.z + mz * speed * dt;
-      const [cx, cz] = collideCircle(nx, nz, CONFIG.playerRadius, colliders);
-      this.x = cx;
-      this.z = cz;
-      this.heading = Math.atan2(mx, mz);
-      this.walkPhase += dt * speed * 1.6;
+      mx /= len; mz /= len;
+      const nx = p.x + mx * speed * dt, nz = p.z + mz * speed * dt;
+      if (!city.blocked(nx, p.z, 0.7)) p.x = nx;
+      if (!city.blocked(p.x, nz, 0.7)) p.z = nz;
+      p.angle = Math.atan2(mx, mz);
     }
-
-    // Jump + gravity.
-    if (k.has("Space") && this.onGround) {
-      this.vy = CONFIG.jumpSpeed;
-      this.onGround = false;
+    if (input.space && p.onGround) { p.vy = CFG.jumpV; p.onGround = false; }
+    if (!p.onGround) {
+      p.vy -= CFG.gravity * dt; p.y += p.vy * dt;
+      if (p.y <= 0) { p.y = 0; p.vy = 0; p.onGround = true; }
     }
-    this.vy -= CONFIG.gravity * dt;
-    this.y += this.vy * dt;
-    if (this.y <= 0) { this.y = 0; this.vy = 0; this.onGround = true; }
-
-    // Animate limbs.
-    const swing = this.moving ? Math.sin(this.walkPhase) * 0.55 : 0;
-    this.legs[0].rotation.x = swing;
-    this.legs[1].rotation.x = -swing;
-    this.arms[0].rotation.x = -swing * 0.8;
-    this.arms[1].rotation.x = swing * 0.8;
-
-    this.mesh.position.set(this.x, this.y, this.z);
-    this.mesh.rotation.y = this.heading;
-
-    // Chase camera.
-    const cd = this.camDist;
-    const cx = this.x - Math.sin(this.camYaw) * Math.cos(this.camPitch) * cd;
-    const cz = this.z - Math.cos(this.camYaw) * Math.cos(this.camPitch) * cd;
-    const cy = this.y + 1.8 + Math.sin(this.camPitch) * cd;
-    camera.position.set(cx, Math.max(0.6, cy), cz);
-    camera.lookAt(this.x, this.y + 1.5, this.z);
+    p.camYaw += (input.mouseDX || 0) * 0.004;
+    input.mouseDX = 0;
+    g.position.set(p.x, p.y, p.z);
+    g.rotation.y = p.angle;
+    // Animasi langkah.
+    const bob = p.moving ? Math.abs(Math.sin(performance.now() / 90)) * 0.08 : 0;
+    body.position.y = 1.2 + bob;
   }
-
-  teleport(x, z) {
-    this.x = x;
-    this.z = z;
-    this.y = 0;
-    this.vy = 0;
-    this.mesh.position.set(x, 0, z);
+  function hurt(n) {
+    let rest = n;
+    if (p.armor > 0) { const ab = Math.min(p.armor, rest); p.armor -= ab; rest -= ab; }
+    p.health -= rest;
+    if (p.health < 0) p.health = 0;
+    return p.health <= 0;
   }
+  function heal(n) { p.health = Math.min(ctx.upgrades?.has('m_health') ? 150 : CFG.maxHp, p.health + n); }
+  p.update = update; p.hurt = hurt; p.heal = heal;
+  return p;
 }

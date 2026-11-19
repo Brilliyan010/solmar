@@ -1,145 +1,64 @@
-// vehicles.js — procedural car models. Every car is built from boxes and
-// cylinders in three.js, so no model files are needed. Six original
-// models, each with its own silhouette, plus a police cruiser variant.
-import * as THREE from "three";
-import { CONFIG } from "./config.js";
+// SOLMAR — 6 mobil original: definisi + mesh prosedural + state kendaraan.
+import * as THREE from 'three';
+import { CFG } from './config.js';
 
-export function carDef(id) {
-  return CONFIG.cars.find((c) => c.id === id);
-}
+export const CARS = CFG.cars;
 
-function box(w, h, d, color, x = 0, y = 0, z = 0) {
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshLambertMaterial({ color }),
-  );
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  return m;
-}
-
-function wheel(x, z) {
-  const w = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.34, 0.34, 0.26, 12),
-    new THREE.MeshLambertMaterial({ color: 0x141414 }),
-  );
-  w.rotation.z = Math.PI / 2;
-  w.position.set(x, 0.34, z);
-  return w;
-}
-
-// Build a car mesh for a definition. Returns { group, wheels, bodyMat }.
-// The group faces -z when heading = 0 (three.js forward), matching the
-// driving code, which rotates the group by its heading.
-export function makeCarMesh(def, opts = {}) {
+export function makeCarMesh(def) {
   const g = new THREE.Group();
-  const color = opts.color ?? def.color;
-  const kind = def.kind;
-  const bodyMat = new THREE.MeshLambertMaterial({ color });
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x1a2a3a });
-
-  let bodyLen = 4.2;
-  let bodyW = 1.9;
-  let bodyH = 0.62;
-  if (kind === "van" || kind === "truck") { bodyLen = 5.0; bodyW = 2.0; bodyH = 0.9; }
-  if (kind === "sport") { bodyLen = 4.4; bodyW = 2.0; bodyH = 0.5; }
-  if (kind === "hatch") { bodyLen = 3.6; bodyW = 1.8; bodyH = 0.66; }
-
-  const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, bodyLen), bodyMat);
-  body.position.y = 0.62;
-  body.castShadow = true;
-  g.add(body);
-
-  // Cabin / cargo.
-  if (kind === "van" || kind === "truck") {
-    const cargo = box(bodyW - 0.1, 1.5, bodyLen * 0.55, color, 0, 1.75, 0.7);
-    g.add(cargo);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(bodyW - 0.2, 0.9, 1.1), glassMat);
-    cab.position.set(0, 1.35, -1.7);
-    g.add(cab);
-  } else {
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(bodyW - 0.3, 0.55, bodyLen * 0.45), glassMat);
-    cabin.position.set(0, 1.18, kind === "sport" ? 0.25 : 0.1);
-    cabin.castShadow = true;
-    g.add(cabin);
+  const bodyMat = new THREE.MeshLambertMaterial({ color: def.color });
+  const darkMat = new THREE.MeshLambertMaterial({ color: 0x181c22 });
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fd8e8, emissive: 0x223344 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, 4.4), bodyMat);
+  body.position.y = 0.65; g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.65, 2.2), glassMat);
+  cabin.position.set(0, 1.3, -0.2); g.add(cabin);
+  if (def.key === 'vantara') {
+    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.4), darkMat);
+    spoiler.position.set(0, 1.25, -2.1); g.add(spoiler);
   }
-
-  // Sport spoiler, taxi sign, truck bed rails.
-  if (kind === "sport") {
-    g.add(box(1.9, 0.07, 0.35, 0x141414, 0, 1.25, 2.05));
-    g.add(box(0.1, 0.3, 0.1, 0x141414, -0.8, 1.05, 2.05));
-    g.add(box(0.1, 0.3, 0.1, 0x141414, 0.8, 1.05, 2.05));
+  if (def.key === 'mule' || def.key === 'hauler') {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.5, 2.6), bodyMat);
+    box.position.set(0, 1.5, -0.8); g.add(box);
   }
-  if (kind === "taxi") {
-    const sign = box(0.7, 0.22, 0.4, 0xffc21a, 0, 1.62, 0);
-    sign.material = new THREE.MeshBasicMaterial({ color: 0xffe14d });
-    g.add(sign);
+  if (def.key === 'cabrio') {
+    const taxi = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 0.8),
+      new THREE.MeshBasicMaterial({ color: 0x111111 }));
+    taxi.position.set(0, 1.75, -0.2); g.add(taxi);
   }
-
-  // Headlights (warm) and taillights (red), always on at golden hour.
-  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
-  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
-  for (const sx of [-1, 1]) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.06), headMat);
-    h.position.set(sx * (bodyW / 2 - 0.35), 0.66, -bodyLen / 2 - 0.02);
-    g.add(h);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.06), tailMat);
-    t.position.set(sx * (bodyW / 2 - 0.35), 0.66, bodyLen / 2 + 0.02);
-    g.add(t);
+  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10);
+  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+  for (const [x, z] of [[-1, 1.5], [1, 1.5], [-1, -1.5], [1, -1.5]]) {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI / 2; w.position.set(x, 0.42, z); g.add(w);
   }
-
-  const wheels = [];
-  const wz = bodyLen / 2 - 0.75;
-  const wx = bodyW / 2 - 0.05;
-  for (const [x, z] of [[-wx, -wz], [wx, -wz], [-wx, wz], [wx, wz]]) {
-    const w = wheel(x, z);
-    g.add(w);
-    wheels.push(w);
+  const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+  for (const x of [-0.7, 0.7]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), lightMat);
+    l.position.set(x, 0.7, 2.22); g.add(l);
   }
-
-  // Police light bar for cruisers.
-  let lightBar = null;
-  if (opts.police) {
-    lightBar = new THREE.Group();
-    const red = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.16, 0.3),
-      new THREE.MeshBasicMaterial({ color: 0xff2020 }),
-    );
-    red.position.x = -0.3;
-    const blue = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.16, 0.3),
-      new THREE.MeshBasicMaterial({ color: 0x2040ff }),
-    );
-    blue.position.x = 0.3;
-    lightBar.add(red);
-    lightBar.add(blue);
-    lightBar.position.set(0, 1.5, 0);
-    lightBar.userData.red = red;
-    lightBar.userData.blue = blue;
-    g.add(lightBar);
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+  for (const x of [-0.7, 0.7]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), tailMat);
+    l.position.set(x, 0.7, -2.22); g.add(l);
   }
-
-  return { group: g, wheels, bodyMat, lightBar };
+  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return g;
 }
 
-// A parked / drivable car entity in the world.
-export function createCar(def, x, z, heading = 0, opts = {}) {
-  const { group, wheels, bodyMat, lightBar } = makeCarMesh(def, opts);
-  group.position.set(x, 0, z);
-  group.rotation.y = heading;
+export function createVehicle(def, x, z, angle = 0) {
   return {
-    def,
-    mesh: group,
-    wheels,
-    bodyMat,
-    lightBar,
-    x,
-    z,
-    heading,
-    speed: 0,
-    steer: 0,
-    damaged: 0, // 0..1, smoke above 0.6
-    owned: !!opts.owned, // player's own (garage) car
-    driver: opts.driver ?? null, // "player" | "traffic" | "police" | null (parked)
+    def, x, z, angle, speed: 0, steer: 0,
+    mesh: makeCarMesh(def),
+    damage: 0, nitro: 100,
   };
+}
+
+// Parkir mobil di pinggir jalan (untuk traffic + mobil curian).
+export function parkCar(scene, def, x, z, angle) {
+  const v = createVehicle(def, x, z, angle);
+  v.mesh.position.set(x, 0, z);
+  v.mesh.rotation.y = angle;
+  scene.add(v.mesh);
+  return v;
 }
