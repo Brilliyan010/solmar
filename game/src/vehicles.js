@@ -1,62 +1,79 @@
-// SOLMAR — 6 mobil original: definisi + mesh prosedural + state kendaraan.
+// SOLMAR — six original cars: their specs, procedural meshes and live state.
 import * as THREE from 'three';
-import { CFG } from './config.js';
+import { TUNE } from './config.js';
 
-export const CARS = CFG.cars;
+export const CAR_DEFS = TUNE.cars;
 
-export function makeCarMesh(def) {
-  const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: def.color });
-  const darkMat = new THREE.MeshLambertMaterial({ color: 0x181c22 });
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fd8e8, emissive: 0x223344 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, 4.4), bodyMat);
-  body.position.y = 0.65; g.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.65, 2.2), glassMat);
-  cabin.position.set(0, 1.3, -0.2); g.add(cabin);
+export function buildCarMesh(def) {
+  const car = new THREE.Group();
+  const paint = new THREE.MeshLambertMaterial({ color: def.color });
+  const trim = new THREE.MeshLambertMaterial({ color: 0x181c22 });
+  const glass = new THREE.MeshLambertMaterial({ color: 0x9fd8e8, emissive: 0x223344 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.75, 4.4), paint);
+  body.position.y = 0.65;
+  car.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.65, 2.2), glass);
+  cabin.position.set(0, 1.3, -0.2);
+  car.add(cabin);
   if (def.key === 'vantara') {
-    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.4), darkMat);
-    spoiler.position.set(0, 1.25, -2.1); g.add(spoiler);
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.4), trim);
+    wing.position.set(0, 1.25, -2.1);
+    car.add(wing);
   }
   if (def.key === 'mule' || def.key === 'hauler') {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.5, 2.6), bodyMat);
-    box.position.set(0, 1.5, -0.8); g.add(box);
+    const cargo = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.5, 2.6), paint);
+    cargo.position.set(0, 1.5, -0.8);
+    car.add(cargo);
   }
   if (def.key === 'cabrio') {
-    const taxi = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 0.8),
-      new THREE.MeshBasicMaterial({ color: 0x111111 }));
-    taxi.position.set(0, 1.75, -0.2); g.add(taxi);
+    const roofSign = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.35, 0.8),
+      new THREE.MeshBasicMaterial({ color: 0x111111 }),
+    );
+    roofSign.position.set(0, 1.75, -0.2);
+    car.add(roofSign);
   }
   const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
   for (const [x, z] of [[-1, 1.5], [1, 1.5], [-1, -1.5], [1, -1.5]]) {
-    const w = new THREE.Mesh(wheelGeo, wheelMat);
-    w.rotation.z = Math.PI / 2; w.position.set(x, 0.42, z); g.add(w);
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(x, 0.42, z);
+    car.add(wheel);
   }
-  const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
   for (const x of [-0.7, 0.7]) {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), lightMat);
-    l.position.set(x, 0.7, 2.22); g.add(l);
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), headMat);
+    lamp.position.set(x, 0.7, 2.22);
+    car.add(lamp);
   }
   const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
   for (const x of [-0.7, 0.7]) {
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), tailMat);
-    l.position.set(x, 0.7, -2.22); g.add(l);
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), tailMat);
+    lamp.position.set(x, 0.7, -2.22);
+    car.add(lamp);
   }
-  g.traverse((o) => { if (o.isMesh) o.castShadow = false; });
-  return g;
+  car.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+  return car;
 }
 
-export function createVehicle(def, x, z, angle = 0) {
+export function spawnVehicle(def, x, z, angle = 0) {
   return {
-    def, x, z, angle, speed: 0, steer: 0,
-    mesh: makeCarMesh(def),
-    damage: 0, nitro: 100,
+    def,
+    x,
+    z,
+    angle,
+    speed: 0,
+    steer: 0,
+    mesh: buildCarMesh(def),
+    damage: 0,
+    nitro: 100,
   };
 }
 
-// Parkir mobil di pinggir jalan (untuk traffic + mobil curian).
-export function parkCar(scene, def, x, z, angle) {
-  const v = createVehicle(def, x, z, angle);
+// Leave a car parked at the kerb (traffic props and stealable cars alike).
+export function parkVehicle(scene, def, x, z, angle) {
+  const v = spawnVehicle(def, x, z, angle);
   v.mesh.position.set(x, 0, z);
   v.mesh.rotation.y = angle;
   scene.add(v.mesh);

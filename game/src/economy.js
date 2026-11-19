@@ -1,43 +1,50 @@
-// SOLMAR — ekonomi: uang, taksi sampingan, Spray Shack, Ironworks, garasi.
-import { CFG } from './config.js';
-import { CARS } from './vehicles.js';
+// SOLMAR — the wallet: cash, taxi fares, the Spray Shack, Ironworks, the garage.
+import { TUNE } from './config.js';
+import { CAR_DEFS } from './vehicles.js';
 
-export function createEconomy(ctx) {
-  const e = { money: CFG.startMoney, taxi: null, garage: ['pipit'], coins: 0 };
+export function runWallet(ctx) {
+  const e = { money: TUNE.pocketMoney, taxi: null, garage: ['pipit'], coins: 0 };
   function add(n, why) {
     e.money += Math.round(n);
     ctx.hud?.flashMoney?.();
     return e.money;
   }
   function spend(n) {
-    if (e.money < n) { ctx.hud?.toast(`Not enough money ($${n} needed)`); return false; }
+    if (e.money < n) {
+      ctx.hud?.toast(`Not enough money ($${n} needed)`);
+      return false;
+    }
     e.money -= n;
     return true;
   }
   function startTaxi() {
     if (e.taxi) return false;
     const dest = ctx.city.roadPos(ctx.rng);
-    e.taxi = { x: dest.x, z: dest.z, fare: CFG.taxiFare };
+    e.taxi = { x: dest.x, z: dest.z, fare: TUNE.taxiFare };
     ctx.hud?.setObjective('TAXI — drive the passenger to the marker');
-    ctx.hud?.toast(`TAXI JOB — fare $${CFG.taxiFare}`);
+    ctx.hud?.toast(`TAXI JOB — fare $${TUNE.taxiFare}`);
     return true;
   }
   function sprayPaint() {
-    const cost = CFG.sprayCost;
+    const cost = TUNE.sprayPrice;
     if (!spend(cost)) return false;
     const v = ctx.driving?.vehicle;
     if (v) {
       v.mesh.children[0].material = v.mesh.children[0].material.clone();
-      v.mesh.children[0].material.color.setHex([0xd64545, 0x3fa7d6, 0x7a2fd6, 0xf2c230][Math.floor(Math.random() * 4)]);
+      const paints = [0xd64545, 0x3fa7d6, 0x7a2fd6, 0xf2c230];
+      v.mesh.children[0].material.color.setHex(paints[Math.floor(Math.random() * paints.length)]);
       v.damage = 0;
     }
-    if (ctx.police) { ctx.police.wanted = 0; ctx.police.hidden = 0; }
+    if (ctx.police) {
+      ctx.police.wanted = 0;
+      ctx.police.hidden = 0;
+    }
     ctx.hud?.toast(`SPRAY SHACK — repainted + repaired, wanted cleared ($${cost})`);
     ctx.audio?.sting('spray');
     return true;
   }
   function buyGun(key) {
-    const cost = CFG.gunCost[key];
+    const cost = TUNE.gunPrice[key];
     if (cost === undefined) return false;
     if (!spend(cost)) return false;
     ctx.combat?.giveWeapon(key);
@@ -45,7 +52,7 @@ export function createEconomy(ctx) {
     return true;
   }
   function buyCar(key) {
-    const def = CARS.find((c) => c.key === key);
+    const def = CAR_DEFS.find((c) => c.key === key);
     if (!def || e.garage.includes(key)) return false;
     if (!spend(def.price)) return false;
     e.garage.push(key);
@@ -54,12 +61,12 @@ export function createEconomy(ctx) {
   }
   function collectCoin() {
     e.coins++;
-    add(CFG.coinValue, 'Sun Coin');
+    add(TUNE.coinPay, 'Sun Coin');
     ctx.upgrades?.addCred(20);
-    ctx.hud?.toast(`Sun Coin ${e.coins}/10 +$${CFG.coinValue}`);
+    ctx.hud?.toast(`Sun Coin ${e.coins}/10 +$${TUNE.coinPay}`);
   }
   function update(dt) {
-    // Taksi: sampai tujuan.
+    // Taxi: the fare lands when the passenger reaches the marker.
     if (e.taxi) {
       const p = ctx.player;
       if (Math.hypot(e.taxi.x - p.x, e.taxi.z - p.z) < 7) {
@@ -72,7 +79,13 @@ export function createEconomy(ctx) {
       }
     }
   }
-  e.add = add; e.spend = spend; e.startTaxi = startTaxi; e.sprayPaint = sprayPaint;
-  e.buyGun = buyGun; e.buyCar = buyCar; e.collectCoin = collectCoin; e.update = update;
+  e.add = add;
+  e.spend = spend;
+  e.startTaxi = startTaxi;
+  e.sprayPaint = sprayPaint;
+  e.buyGun = buyGun;
+  e.buyCar = buyCar;
+  e.collectCoin = collectCoin;
+  e.update = update;
   return e;
 }

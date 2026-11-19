@@ -1,14 +1,18 @@
-// SOLMAR — semua angka tuning di satu tempat.
-export const CFG = {
-  // Dunia: jalan di x/z = ±31, ±93, ±155 (lebar 10); kota ±186; laut z > 200.
-  roadAt: [-155, -93, -31, 31, 93, 155],
-  roadW: 10,
-  bound: 186,
-  seaZ: 200,
-  // Player jalan kaki.
-  walk: 7, sprint: 11, jumpV: 8.5, gravity: 22,
-  maxHp: 100, maxArmor: 100,
-  // Mobil (top = m/detik, ~x3.6 = km/h).
+// SOLMAR — every tuning number in one place. Change the feel here, not in systems.
+export const TUNE = {
+  // The city: avenues at x/z = ±31, ±93, ±155 (10 wide); town edge ±186; sea past z 200.
+  avenues: [-155, -93, -31, 31, 93, 155],
+  avenueWidth: 10,
+  townEdge: 186,
+  seaLine: 200,
+  // Mara on foot.
+  walkSpeed: 7,
+  sprintSpeed: 11,
+  jumpSpeed: 8.5,
+  gravityPull: 22,
+  heroMaxHp: 100,
+  heroMaxArmor: 100,
+  // The six stealable cars (top speed m/s, ~x3.6 = km/h).
   cars: [
     { key: 'pipit', name: 'Pipit', color: 0x3fa7d6, top: 30, accel: 14, grip: 2.6, price: 0 },
     { key: 'corto', name: 'Corto', color: 0xd64545, top: 36, accel: 16, grip: 2.8, price: 1200 },
@@ -17,18 +21,23 @@ export const CFG = {
     { key: 'vantara', name: 'Vantara', color: 0x7a2fd6, top: 46, accel: 22, grip: 3.4, price: 8000 },
     { key: 'hauler', name: 'Hauler', color: 0x3d7a3d, top: 26, accel: 11, grip: 2.2, price: 2200 },
   ],
-  trafficN: 22, pedN: 36,
-  // Wanted: naik per aksi; decay bila sembunyi 20 dtk.
-  heatDecay: 20, heatPerSteal: 1, heatPerHit: 1, heatPerShot: 1, heatPerKill: 2,
-  // Misi: hadiah $.
-  missionReward: [500, 1500, 2500, 4000, 10000],
-  // Boss: hp, damage per hit, kecepatan.
+  trafficCount: 22,
+  crowdCount: 36,
+  // Wanted: climbs per crime, cools off after hiding out of sight for a while.
+  hideoutSeconds: 20,
+  heatSteal: 1,
+  heatHitPed: 1,
+  heatShot: 1,
+  heatKill: 2,
+  // Story payouts, M1 to M5.
+  storyPay: [500, 1500, 2500, 4000, 10000],
+  // Bosses: health, damage per hit, foot speed.
   bosses: {
     rico: { name: 'Rico Vane', title: 'Harbor Enforcer', hp: 300, dmg: 14, speed: 3.2, reward: 2000 },
     neonking: { name: 'Neon King', title: 'Street Race Champion', hp: 250, dmg: 12, speed: 5.2, reward: 3000 },
     kessler: { name: 'Dario Kessler', title: 'Harbor Boss', hp: 600, dmg: 18, speed: 3.6, reward: 10000 },
   },
-  // Upgrade (12): 4 senjata, 4 mobil, 4 Mara.
+  // Twelve upgrades: four for guns, four for cars, four for Mara herself.
   upgrades: [
     { id: 'w_dmg', name: 'Extended Barrels', kind: 'weapon', cost: 800, desc: '+35% weapon damage' },
     { id: 'w_mag', name: 'Drum Magazines', kind: 'weapon', cost: 700, desc: '+60% magazine size' },
@@ -43,21 +52,28 @@ export const CFG = {
     { id: 'm_vest', name: 'Kevlar Vest', kind: 'mara', cost: 1000, desc: 'Start each life with 50 armor' },
     { id: 'm_luck', name: 'Lucky Charm', kind: 'mara', cost: 800, desc: '+15% money from jobs and missions' },
   ],
-  // 12 Sun Relics: tiap 3 = 1 perk permanen.
-  relicPerks: [
+  // Twelve Sun Relics: every third one unlocks a permanent blessing.
+  relicBlessings: [
     { n: 3, name: 'Sun Blessing I', desc: '+25 max HP' },
     { n: 6, name: 'Sun Blessing II', desc: 'Wanted cools down 2x faster' },
     { n: 9, name: 'Sun Blessing III', desc: '+20% money from all sources' },
     { n: 12, name: 'Sun Blessing IV', desc: 'All shops 30% cheaper' },
   ],
-  credRanks: ['Rookie', 'Runner', 'Wheelman', 'Kingpin', 'Legend of Solmar'],
-  credNeed: [0, 150, 400, 900, 1800],
-  // Aktivitas: 6 race, 8 jump, 5 photo, courier, vigilante.
-  raceReward: 600, jumpReward: 150, photoReward: 100, courierReward: 350, vigilanteReward: 800,
-  taxiFare: 120, coinValue: 50,
-  sprayCost: 150, gunCost: { pistol: 0, shotgun: 600, smg: 1500 },
-  // Atmosfer: fase hari (detik per fase) + hujan.
-  dayLength: 240, rainChance: 0.22,
-  // Ekonomi.
-  startMoney: 200,
+  credTitles: ['Rookie', 'Runner', 'Wheelman', 'Kingpin', 'Legend of Solmar'],
+  credThresholds: [0, 150, 400, 900, 1800],
+  // Side-job payouts.
+  racePay: 600,
+  jumpPay: 150,
+  photoPay: 100,
+  courierPay: 350,
+  vigilantePay: 800,
+  taxiFare: 120,
+  coinPay: 50,
+  sprayPrice: 150,
+  gunPrice: { pistol: 0, shotgun: 600, smg: 1500 },
+  // Sky: seconds per full day, chance of rain when the weather turns.
+  daySeconds: 240,
+  rainOdds: 0.22,
+  // Starting wallet.
+  pocketMoney: 200,
 };

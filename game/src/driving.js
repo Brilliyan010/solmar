@@ -1,7 +1,7 @@
-// SOLMAR — mengemudi arcade: gas/rem/belok, handbrake drift, nitro, tabrakan.
-import { CFG } from './config.js';
+// SOLMAR — arcade driving: throttle and brake, steering, handbrake drift, nitro.
+import { TUNE } from './config.js';
 
-export function createDriving(ctx) {
+export function runDriving(ctx) {
   const d = { vehicle: null };
   function enter(v) {
     d.vehicle = v;
@@ -20,10 +20,14 @@ export function createDriving(ctx) {
     p.mesh.position.set(p.x, 0, p.z);
   }
   function nearestParked(maxD = 4) {
-    let best = null, bd = maxD;
+    let best = null;
+    let bd = maxD;
     for (const v of ctx.parked) {
       const dist = Math.hypot(v.x - ctx.player.x, v.z - ctx.player.z);
-      if (dist < bd) { bd = dist; best = v; }
+      if (dist < bd) {
+        bd = dist;
+        best = v;
+      }
     }
     return best;
   }
@@ -39,11 +43,14 @@ export function createDriving(ctx) {
     else if (input.s) v.speed -= v.def.accel * 1.4 * dt;
     else v.speed -= Math.sign(v.speed) * 6 * dt;
     if (input.space) v.speed -= Math.sign(v.speed) * 26 * dt; // handbrake
-    // Nitro (Shift di mobil).
+    // Nitro on Shift, only with the Nitro Kit fitted.
     if (input.shift && up?.has('c_nitro') && v.nitro > 0 && v.speed > 5) {
-      v.speed += 18 * dt; v.nitro -= 30 * dt;
+      v.speed += 18 * dt;
+      v.nitro -= 30 * dt;
       ctx.effects?.dust(v.x, v.z);
-    } else v.nitro = Math.min(100, v.nitro + 4 * dt);
+    } else {
+      v.nitro = Math.min(100, v.nitro + 4 * dt);
+    }
     v.speed = Math.max(-top * 0.45, Math.min(top, v.speed));
     if (Math.abs(v.speed) < 0.15) v.speed = 0;
     const steer = (input.a ? 1 : 0) - (input.d ? 1 : 0);
@@ -53,7 +60,7 @@ export function createDriving(ctx) {
     }
     const nx = v.x + Math.sin(v.angle) * v.speed * dt;
     const nz = v.z + Math.cos(v.angle) * v.speed * dt;
-    // Tabrakan gedung: geser sepanjang sumbu yang bebas, rusak bila keras.
+    // Building hit: slide along the free axis, take damage on a hard impact.
     const hitX = ctx.city.blocked(nx, v.z, 1.6);
     const hitZ = ctx.city.blocked(v.x, nz, 1.6);
     if (hitX || hitZ) {
@@ -63,18 +70,24 @@ export function createDriving(ctx) {
         ctx.effects?.smoke(v.x, v.z);
         ctx.audio?.crash();
         if (ctx.police && impact > 18) ctx.police.addHeat(1, 'crash');
-        if (v.damage > 100) { v.speed = 0; }
+        if (v.damage > 100) v.speed = 0;
       }
       if (!hitX) v.x = nx;
       if (!hitZ) v.z = nz;
       v.speed *= 0.45;
-    } else { v.x = nx; v.z = nz; }
+    } else {
+      v.x = nx;
+      v.z = nz;
+    }
     v.mesh.position.set(v.x, 0, v.z);
     v.mesh.rotation.y = v.angle;
     v.mesh.rotation.z = -steer * Math.min(0.12, Math.abs(v.speed) * 0.004);
-    // Kamera mengikuti dari belakang mobil — game.js membaca d.vehicle.
+    // The engine hum follows road speed — game.js reads d.vehicle.
     ctx.audio?.engine(Math.abs(v.speed) / top);
   }
-  d.enter = enter; d.exit = exit; d.update = update; d.nearestParked = nearestParked;
+  d.enter = enter;
+  d.exit = exit;
+  d.update = update;
+  d.nearestParked = nearestParked;
   return d;
 }

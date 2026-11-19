@@ -1,7 +1,7 @@
-// SOLMAR — save/load localStorage (uang, misi, upgrade, relic, cred, garasi, boss).
+// SOLMAR — save and load in localStorage (cash, missions, upgrades, relics, bosses).
 const KEY = 'solmar-save-v1';
 
-export function createSave(ctx) {
+export function runSave(ctx) {
   function save() {
     try {
       const data = {
@@ -13,11 +13,14 @@ export function createSave(ctx) {
         garage: ctx.economy?.garage || ['pipit'],
         bosses: Object.keys(ctx.bosses?.defeated || {}),
         coins: ctx.economy?.coins ?? 0,
-        x: ctx.player.x, z: ctx.player.z,
+        x: ctx.player.x,
+        z: ctx.player.z,
       };
       localStorage.setItem(KEY, JSON.stringify(data));
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
   function load() {
     try {
@@ -37,12 +40,21 @@ export function createSave(ctx) {
       }
       if (ctx.bosses) d.bosses?.forEach((id) => { ctx.bosses.defeated[id] = true; });
       if (typeof d.x === 'number' && ctx.player) {
-        ctx.player.x = d.x; ctx.player.z = d.z;
+        ctx.player.x = d.x;
+        ctx.player.z = d.z;
         ctx.player.mesh.position.set(d.x, 0, d.z);
       }
       return d;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
-  function wipe() { try { localStorage.removeItem(KEY); } catch {} }
+  function wipe() {
+    try {
+      localStorage.removeItem(KEY);
+    } catch {
+      // No storage available — nothing to wipe.
+    }
+  }
   return { save, load, wipe };
 }

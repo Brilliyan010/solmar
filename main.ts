@@ -1,32 +1,53 @@
-// SOLMAR — Streets of Solmar (gta6-01). Entrypoint: salin game/ + screenshots/
-// ke direktori output lalu tulis dossier.json lewat library make.fun yang
-// di-vendor. Dijalankan dua kali harus byte-identik (buildDossier deterministik).
+// SOLMAR — Streets of Solmar: gta6-01 entrypoint (Node 22, standard library only).
+// Hands the game in: copies the game/ and screenshots/ beside this file into the
+// output directory and writes the judge's dossier there with the vendored make.fun
+// library. Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+// The scorer's own caps (kit RULES.txt / gate.json): only text_max_bytes shapes the
+// dossier's bytes; the rest refuse an entry the scorer would refuse (more than 4
+// screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
+// files, in all, or a path under game/ over 1000 bytes).
+const dossierCaps = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+  game_path_max_bytes: 1000,
+};
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) {
-  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+const repoRoot = fileURLToPath(new URL('.', import.meta.url));
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+function copyIntoOut(name: string): void {
+  const from = join(repoRoot, name);
+  if (!existsSync(from)) return;
+  cpSync(from, join(outDir, name), { recursive: true });
 }
 
-// Caps scorer (reference/gate.json): teks dossier maks 160 KiB, maks 4 screenshot
-// @ 256 KiB, game maks 993 file / 48 MiB, path maks 1000 byte.
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
+mkdirSync(outDir, { recursive: true });
+copyIntoOut('game');
+copyIntoOut('screenshots');
+
+const dossierPath = join(outDir, 'dossier.json');
+const dossierBytes = buildDossier(outDir, dossierCaps);
+writeFileSync(dossierPath, dossierBytes);
+
+// Read the dossier back and confirm it is a well-formed dossier document: a
+// JSON object carrying the Game text and the screenshot images. This guards the
+// entry against a silent empty write; it changes nothing under /output.
+const dossierDoc = JSON.parse(new TextDecoder().decode(readFileSync(dossierPath))) as {
+  text?: unknown;
+  images?: unknown;
+};
+if (typeof dossierDoc.text !== 'string' || !Array.isArray(dossierDoc.images)) {
+  throw new Error('dossier.json: not a well-formed dossier document');
+}
+process.stdout.write(
+  `SOLMAR dossier: ${dossierBytes.length} bytes, ${dossierDoc.images.length} screenshots -> ${dossierPath}\n`,
 );
-console.error(`solmar dossier written to ${join(out, 'dossier.json')}`);
