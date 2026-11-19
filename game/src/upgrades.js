@@ -1,11 +1,12 @@
-// SOLMAR — progression: 12 upgrades (guns, cars, Mara) + 12 Sun Relics + Street Cred.
+// SOLMAR — progression: 12 upgrades (guns, cars, Mara) + 12 Sun Relics
+// hidden across the city + Street Cred ranks.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
 export const UPGRADE_DEFS = TUNE.upgrades;
 export const CRED_TITLES = TUNE.credTitles;
 
-// Twelve hidden Sun Relic spots across the city (roofs, beach, harbor, park...).
+// The twelve Sun Relic hiding spots (roofs, beach, harbor, park...).
 export const RELIC_HIDING = [
   { x: -62, z: -58, hint: 'Solmar Spire base' },
   { x: 150, z: 196, hint: 'Marina pier end' },
@@ -28,6 +29,7 @@ export function runProgress(scene, ctx) {
     cred: 0,
     relicMeshes: [],
   };
+
   // Relic markers: golden orbs that bob above their hiding spots.
   for (let i = 0; i < RELIC_HIDING.length; i++) {
     const s = RELIC_HIDING[i];
@@ -39,10 +41,13 @@ export function runProgress(scene, ctx) {
     scene.add(orb);
     u.relicMeshes.push(orb);
   }
+
   function has(id) { return u.owned.has(id); }
+
   function buy(id) {
     const def = UPGRADE_DEFS.find((x) => x.id === id);
     if (!def || u.owned.has(id)) return false;
+    // A full relic set makes every shop 30% cheaper.
     const cost = Math.round(def.cost * (u.relicPerk('discount') ? 0.7 : 1));
     if (!ctx.economy?.spend(cost)) return false;
     u.owned.add(id);
@@ -52,6 +57,8 @@ export function runProgress(scene, ctx) {
     ctx.audio?.sting('buy');
     return true;
   }
+
+  // A blessing is live once enough relics are found (3/6/9/12).
   function relicPerk(kind) {
     const n = u.relicsFound.size;
     if (kind === 'hp' && n >= 3) return true;
@@ -60,6 +67,7 @@ export function runProgress(scene, ctx) {
     if (kind === 'discount' && n >= 12) return true;
     return false;
   }
+
   function collectRelic(i) {
     if (u.relicsFound.has(i)) return false;
     u.relicsFound.add(i);
@@ -77,6 +85,8 @@ export function runProgress(scene, ctx) {
     }
     return true;
   }
+
+  // Cred goes up; crossing a threshold announces the new rank.
   function addCred(n) {
     const before = rank();
     u.cred += n;
@@ -86,6 +96,7 @@ export function runProgress(scene, ctx) {
       ctx.audio?.sting('rankup');
     }
   }
+
   function rank() {
     let r = 0;
     for (let i = 0; i < TUNE.credThresholds.length; i++) {
@@ -93,19 +104,21 @@ export function runProgress(scene, ctx) {
     }
     return r;
   }
+
   function update(dt) {
+    // The unfound orbs bob and spin; Mara collects one by walking close.
     const t = performance.now() / 500;
     u.relicMeshes.forEach((orb, i) => {
       if (u.relicsFound.has(i)) return;
       orb.position.y = 1.6 + Math.sin(t + i) * 0.35;
       orb.rotation.y += dt;
     });
-    // Pick a relic up when Mara walks close to it.
     const p = ctx.player;
     RELIC_HIDING.forEach((s, i) => {
       if (!u.relicsFound.has(i) && Math.hypot(s.x - p.x, s.z - p.z) < 2.4) collectRelic(i);
     });
   }
+
   u.has = has;
   u.buy = buy;
   u.relicPerk = relicPerk;

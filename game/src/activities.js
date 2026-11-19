@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
+// Six race courses: start line plus four checkpoints, in order.
 const RACE_COURSES = [
   { name: 'Neon Sprint', x: 93, z: -60, cps: [[93, 60], [31, 93], [-31, 93], [-93, 31]] },
   { name: 'Marina Loop', x: 60, z: 150, cps: [[155, 150], [155, 31], [93, 31], [60, 150]] },
@@ -11,10 +12,12 @@ const RACE_COURSES = [
   { name: 'Beach Run', x: 31, z: 186, cps: [[93, 186], [155, 150], [93, 93], [31, 186]] },
   { name: 'Downtown GP', x: -93, z: 93, cps: [[-31, 93], [31, 93], [31, 31], [-93, 93]] },
 ];
+// Eight stunt ramps: catch air over one at speed.
 const JUMP_RAMPS = [
   { x: 31, z: -120 }, { x: -93, z: 60 }, { x: 93, z: 120 }, { x: -31, z: 150 },
   { x: 155, z: -31 }, { x: -155, z: -120 }, { x: 60, z: -155 }, { x: -60, z: 186 },
 ];
+// Five photo spots: stand in the green orb and press E.
 const PHOTO_VIEWS = [
   { x: 93, z: 200, name: 'Sunset Beach' },
   { x: -62, z: -70, name: 'Spire View' },
@@ -34,6 +37,8 @@ export function runSideJobs(scene, city, ctx) {
   };
   const ringGeo = new THREE.TorusGeometry(3, 0.3, 8, 20);
   const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd24d });
+
+  // Cyan start pads at each race line.
   const startPads = [];
   for (const r of RACE_COURSES) {
     const pad = new THREE.Mesh(
@@ -44,6 +49,7 @@ export function runSideJobs(scene, city, ctx) {
     scene.add(pad);
     startPads.push(pad);
   }
+  // Orange ramps for the stunt jumps.
   const jumpMeshes = [];
   for (const j of JUMP_RAMPS) {
     const ramp = new THREE.Mesh(
@@ -55,6 +61,7 @@ export function runSideJobs(scene, city, ctx) {
     scene.add(ramp);
     jumpMeshes.push(ramp);
   }
+  // Green orbs for the photo spots.
   const photoMeshes = [];
   for (const p of PHOTO_VIEWS) {
     const orb = new THREE.Mesh(
@@ -65,6 +72,8 @@ export function runSideJobs(scene, city, ctx) {
     scene.add(orb);
     photoMeshes.push(orb);
   }
+
+  // One golden ring marks the current checkpoint / drop-off / target.
   let cpMarker = null;
   function showCp(x, z) {
     if (!cpMarker) {
@@ -75,6 +84,7 @@ export function runSideJobs(scene, city, ctx) {
     cpMarker.position.set(x, 2.4, z);
   }
   function hideCp() { if (cpMarker) cpMarker.visible = false; }
+
   function startRace(i) {
     if (a.race) return false;
     a.race = RACE_COURSES[i];
@@ -85,6 +95,7 @@ export function runSideJobs(scene, city, ctx) {
     ctx.hud?.toast(`RACE START — ${a.race.name} ($${TUNE.racePay})`);
     return true;
   }
+
   function startCourier() {
     if (a.courier) return false;
     const dest = city.roadPos(ctx.rng);
@@ -94,6 +105,7 @@ export function runSideJobs(scene, city, ctx) {
     showCp(dest.x, dest.z);
     return true;
   }
+
   function startVigilante() {
     if (a.vigilante || !ctx.traffic) return false;
     const p = city.roadPos(ctx.rng);
@@ -103,6 +115,8 @@ export function runSideJobs(scene, city, ctx) {
     showCp(p.x, p.z);
     return true;
   }
+
+  // A race win pays the purse plus a speed bonus for a fast time.
   function finishRace() {
     const bonus = Math.max(0, Math.round((90 - a.raceT) * 5));
     ctx.economy?.add(TUNE.racePay + bonus, `race ${a.race.name}`);
@@ -113,10 +127,11 @@ export function runSideJobs(scene, city, ctx) {
     hideCp();
     ctx.missions?.refreshObjective?.();
   }
+
   function update(dt) {
     const p = ctx.player;
     const inCar = !!ctx.driving?.vehicle;
-    // Race: drive through each checkpoint in order.
+    // Race: drive through each checkpoint in order, before the 150s limit.
     if (a.race) {
       a.raceT += dt;
       const [cx, cz] = a.race.cps[a.raceCp];
@@ -175,7 +190,7 @@ export function runSideJobs(scene, city, ctx) {
         hideCp();
       }
     }
-    // Stunt jump: catch air over a ramp at speed.
+    // Stunt jump: catch air over a ramp at speed, once per ramp.
     if (inCar) {
       for (let i = 0; i < JUMP_RAMPS.length; i++) {
         const j = JUMP_RAMPS[i];
@@ -194,6 +209,7 @@ export function runSideJobs(scene, city, ctx) {
       orb.position.y = 2 + Math.sin(performance.now() / 400 + i) * 0.2;
     });
   }
+
   function tryPhoto() {
     const p = ctx.player;
     for (let i = 0; i < PHOTO_VIEWS.length; i++) {
@@ -209,6 +225,7 @@ export function runSideJobs(scene, city, ctx) {
     }
     return false;
   }
+
   function nearRaceStart() {
     const p = ctx.player;
     for (let i = 0; i < RACE_COURSES.length; i++) {
@@ -217,6 +234,7 @@ export function runSideJobs(scene, city, ctx) {
     }
     return -1;
   }
+
   a.startRace = startRace;
   a.startCourier = startCourier;
   a.startVigilante = startVigilante;

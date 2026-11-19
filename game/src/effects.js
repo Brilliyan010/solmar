@@ -18,6 +18,7 @@ export function runFx(scene) {
   const tex = softDot();
   const parts = [];
   const e = { shakeMag: 0 };
+
   function spawn(x, y, z, color, n, spread, up, life) {
     for (let i = 0; i < n; i++) {
       const sprite = new THREE.Sprite(
@@ -40,13 +41,17 @@ export function runFx(scene) {
       });
     }
   }
+
   function dust(x, z) { spawn(x, 0.3, z, 0xcbb98f, 4, 1.6, 0.8, 0.7); }
   function smoke(x, z) { spawn(x, 1, z, 0x555555, 8, 1.4, 1.6, 1.4); }
+
   function flash(x, y, z) {
     spawn(x, y, z, 0xffd24d, 5, 0.4, 0.4, 0.18);
     e.shakeMag = Math.max(e.shakeMag, 0.12);
   }
+
   function shake(mag) { e.shakeMag = Math.max(e.shakeMag, mag); }
+
   function update(dt) {
     for (let i = parts.length - 1; i >= 0; i--) {
       const p = parts[i];
@@ -65,6 +70,7 @@ export function runFx(scene) {
     }
     e.shakeMag = Math.max(0, e.shakeMag - dt * 0.5);
   }
+
   e.dust = dust;
   e.smoke = smoke;
   e.flash = flash;

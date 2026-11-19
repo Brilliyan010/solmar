@@ -330,17 +330,20 @@ export function raiseCity(scene, rng) {
     }
     return false;
   }
+
   function onRoad(x, z) {
     for (const r of A) {
       if (Math.abs(x - r) < TUNE.avenueWidth / 2 + 1 || Math.abs(z - r) < TUNE.avenueWidth / 2 + 1) return true;
     }
     return false;
   }
+
   function roadPos(dice) {
     const rx = dice.choose(A);
     const rz = dice.between(-175, 175);
     return dice.odds(0.5) ? { x: rx, z: rz } : { x: dice.between(-175, 175), z: rx };
   }
+
   return {
     group: root,
     buildings: towers,

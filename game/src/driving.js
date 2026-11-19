@@ -1,24 +1,30 @@
-// SOLMAR — arcade driving: throttle and brake, steering, handbrake drift, nitro.
+// SOLMAR — arcade driving: throttle and brake, steering, handbrake drift,
+// and a nitro boost for cars with the Nitro Kit fitted.
 import { TUNE } from './config.js';
 
 export function runDriving(ctx) {
   const d = { vehicle: null };
+
   function enter(v) {
     d.vehicle = v;
     ctx.player.mesh.visible = false;
     ctx.audio?.sting('enter');
     return true;
   }
+
   function exit() {
     if (!d.vehicle) return;
     const v = d.vehicle;
     d.vehicle = null;
+    // Step out on the car's left side.
     const p = ctx.player;
     p.mesh.visible = true;
     p.x = v.x + Math.sin(v.angle + Math.PI / 2) * 2.5;
     p.z = v.z + Math.cos(v.angle + Math.PI / 2) * 2.5;
     p.mesh.position.set(p.x, 0, p.z);
   }
+
+  // The closest parked car within reach, or null.
   function nearestParked(maxD = 4) {
     let best = null;
     let bd = maxD;
@@ -31,19 +37,23 @@ export function runDriving(ctx) {
     }
     return best;
   }
+
   function update(dt, input) {
     const v = d.vehicle;
     if (!v) return;
     const up = ctx.upgrades;
     const topMul = up?.has('c_engine') ? 1.25 : 1;
     const accMul = up?.has('c_engine') ? 1.2 : 1;
+    // Rain and bad suspension both eat grip.
     const grip = v.def.grip * (up?.has('c_grip') ? 1.3 : 1) * (ctx.rain ? 0.75 : 1);
     const top = v.def.top * topMul;
+    // W/S are gas and brake; with neither, the car coasts to a stop.
     if (input.w) v.speed += v.def.accel * accMul * dt;
     else if (input.s) v.speed -= v.def.accel * 1.4 * dt;
     else v.speed -= Math.sign(v.speed) * 6 * dt;
-    if (input.space) v.speed -= Math.sign(v.speed) * 26 * dt; // handbrake
-    // Nitro on Shift, only with the Nitro Kit fitted.
+    // Space is the handbrake: hard slow-down and drift.
+    if (input.space) v.speed -= Math.sign(v.speed) * 26 * dt;
+    // Nitro on Shift, only with the kit fitted and fuel in the tank.
     if (input.shift && up?.has('c_nitro') && v.nitro > 0 && v.speed > 5) {
       v.speed += 18 * dt;
       v.nitro -= 30 * dt;
@@ -53,6 +63,7 @@ export function runDriving(ctx) {
     }
     v.speed = Math.max(-top * 0.45, Math.min(top, v.speed));
     if (Math.abs(v.speed) < 0.15) v.speed = 0;
+    // Steering bites harder the faster the car goes, up to a point.
     const steer = (input.a ? 1 : 0) - (input.d ? 1 : 0);
     if (v.speed !== 0) {
       const dir = v.speed > 0 ? 1 : -1;
@@ -60,7 +71,7 @@ export function runDriving(ctx) {
     }
     const nx = v.x + Math.sin(v.angle) * v.speed * dt;
     const nz = v.z + Math.cos(v.angle) * v.speed * dt;
-    // Building hit: slide along the free axis, take damage on a hard impact.
+    // A building hit: slide along the free axis, take damage on a hard one.
     const hitX = ctx.city.blocked(nx, v.z, 1.6);
     const hitZ = ctx.city.blocked(v.x, nz, 1.6);
     if (hitX || hitZ) {
@@ -81,10 +92,11 @@ export function runDriving(ctx) {
     }
     v.mesh.position.set(v.x, 0, v.z);
     v.mesh.rotation.y = v.angle;
+    // Lean into the turn a little.
     v.mesh.rotation.z = -steer * Math.min(0.12, Math.abs(v.speed) * 0.004);
-    // The engine hum follows road speed — game.js reads d.vehicle.
     ctx.audio?.engine(Math.abs(v.speed) / top);
   }
+
   d.enter = enter;
   d.exit = exit;
   d.update = update;

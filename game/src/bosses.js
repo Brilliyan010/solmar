@@ -1,9 +1,12 @@
-// SOLMAR — three named bosses: Rico Vane (M3), Neon King (M4), Dario Kessler (M5).
+// SOLMAR — the three named bosses: Rico Vane (M3), Neon King (M4),
+// Dario Kessler (M5). Each has three phases; Kessler calls in guards as
+// he weakens and heats the wanted level at phase 3.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
 export function runBosses(scene, ctx) {
   const b = { active: null, defeated: {}, list: [] };
+
   function spawn(id, x, z) {
     const def = TUNE.bosses[id];
     if (!def) return null;
@@ -22,7 +25,7 @@ export function runBosses(scene, ctx) {
     );
     head.position.y = 2.2 * scale;
     figure.add(head);
-    // Kessler wears a gold ring; the Neon King a glowing helm.
+    // Kessler's gold ring; the Neon King's glowing helm.
     if (id === 'kessler') {
       const crown = new THREE.Mesh(
         new THREE.TorusGeometry(0.42, 0.07, 6, 12),
@@ -70,6 +73,8 @@ export function runBosses(scene, ctx) {
     ctx.audio?.sting('boss');
     return boss;
   }
+
+  // Phases flip at 2/3 and 1/3 health; each flip is announced.
   function phaseCheck(boss) {
     const frac = boss.hp / boss.maxHp;
     const want = frac > 0.66 ? 1 : frac > 0.33 ? 2 : 3;
@@ -77,7 +82,6 @@ export function runBosses(scene, ctx) {
       boss.phase = want;
       ctx.hud?.toast(`${boss.def.name} — PHASE ${want}!`);
       ctx.audio?.sting('phase');
-      // Kessler calls in guards as he weakens; phase 3 also heats the wanted level.
       if (boss.id === 'kessler' && want >= 2 && ctx.combat) {
         for (let i = 0; i < 2; i++) {
           const gd = ctx.combat.spawnGuard(boss.x + (i ? 6 : -6), boss.z + 8, { hp: 60, dmg: 9 });
@@ -87,6 +91,8 @@ export function runBosses(scene, ctx) {
       if (boss.id === 'kessler' && want === 3) ctx.police?.addHeat(2, 'boss');
     }
   }
+
+  // Hurt a boss; returns true when the hit kills him.
   function damage(boss, n) {
     if (!boss || boss.hp <= 0) return false;
     boss.hp -= n;
@@ -107,6 +113,7 @@ export function runBosses(scene, ctx) {
     }
     return false;
   }
+
   function update(dt) {
     const boss = b.active;
     if (!boss || boss.hp <= 0) return;
@@ -114,7 +121,8 @@ export function runBosses(scene, ctx) {
     const dx = p.x - boss.x;
     const dz = p.z - boss.z;
     const dist = Math.hypot(dx, dz) || 1;
-    // Close to firing range, back off when too close, strafe in between.
+    // Keep a firing distance: close in when far, back off when crowded,
+    // strafe sideways in between.
     boss.moveT -= dt;
     const wantDist = boss.id === 'neonking' ? 10 : 16;
     let mx = 0;
@@ -154,6 +162,7 @@ export function runBosses(scene, ctx) {
     }
     ctx.hud?.bossBar(boss);
   }
+
   b.spawn = spawn;
   b.damage = damage;
   b.update = update;

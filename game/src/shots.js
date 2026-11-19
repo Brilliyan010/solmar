@@ -10,6 +10,7 @@ export function stageShots(game) {
   game.setSeed(seed);
   const P = game.player;
   const cam = game.setCamera;
+
   if (shot === 'start') {
     game.state = 'menu';
     game.hud.showMenu('start');
@@ -95,6 +96,7 @@ export function stageShots(game) {
     cam(95, 58, 252, -40, 6, -60);
     game.applyCamera();
   }
+
   // Hide the toast for a clean frame, render once, signal the driver.
   const toast = document.getElementById('toast');
   if (toast) toast.style.opacity = '0';

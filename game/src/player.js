@@ -1,4 +1,6 @@
-// SOLMAR — Mara Voss on foot: third-person, WASD + Shift + Space, orbit camera.
+// SOLMAR — Mara Voss on foot: third-person, WASD + Shift + Space, orbit
+// camera. The hero is a small procedural figure: jacket, head, hair, legs,
+// and a sidearm that only shows once she owns a gun.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
@@ -26,6 +28,7 @@ export function spawnHero(scene, city) {
   );
   legs.position.y = 0.42;
   figure.add(legs);
+  // The sidearm at her hip, hidden until she owns a real gun.
   const sidearm = new THREE.Mesh(
     new THREE.BoxGeometry(0.12, 0.12, 0.5),
     new THREE.MeshLambertMaterial({ color: 0x111111 }),
@@ -35,6 +38,7 @@ export function spawnHero(scene, city) {
   sidearm.visible = false;
   figure.add(sidearm);
   scene.add(figure);
+
   const hero = {
     mesh: figure,
     x: 14,
@@ -48,9 +52,12 @@ export function spawnHero(scene, city) {
     onGround: true,
     moving: false,
   };
+
   function update(dt, input, ctx) {
+    // Sprinting costs nothing but moves faster (faster still in good shoes).
     const sprintBonus = ctx.upgrades?.has('m_sprint') ? 1.25 : 1;
     const pace = (input.shift ? TUNE.sprintSpeed : TUNE.walkSpeed) * sprintBonus;
+    // WASD relative to the camera's yaw, not the world's axes.
     let mx = 0;
     let mz = 0;
     if (input.w) { mx -= Math.sin(hero.camYaw); mz -= Math.cos(hero.camYaw); }
@@ -62,12 +69,14 @@ export function spawnHero(scene, city) {
     if (len > 0) {
       mx /= len;
       mz /= len;
+      // Slide along walls: each axis is tested on its own.
       const nx = hero.x + mx * pace * dt;
       const nz = hero.z + mz * pace * dt;
       if (!city.blocked(nx, hero.z, 0.7)) hero.x = nx;
       if (!city.blocked(hero.x, nz, 0.7)) hero.z = nz;
       hero.angle = Math.atan2(mx, mz);
     }
+    // Jump, then gravity until the ground catches her again.
     if (input.space && hero.onGround) {
       hero.vy = TUNE.jumpSpeed;
       hero.onGround = false;
@@ -81,14 +90,17 @@ export function spawnHero(scene, city) {
         hero.onGround = true;
       }
     }
+    // The mouse orbits the camera; the movement keys follow it.
     hero.camYaw += (input.mouseDX || 0) * 0.004;
     input.mouseDX = 0;
     figure.position.set(hero.x, hero.y, hero.z);
     figure.rotation.y = hero.angle;
-    // A step bob while moving.
+    // A small step bob while she is moving.
     const bob = hero.moving ? Math.abs(Math.sin(performance.now() / 90)) * 0.08 : 0;
     torso.position.y = 1.2 + bob;
   }
+
+  // Damage soaks into armor first, then health. Returns true on death.
   function hurt(n) {
     let rest = n;
     if (hero.armor > 0) {
@@ -100,10 +112,12 @@ export function spawnHero(scene, city) {
     if (hero.health < 0) hero.health = 0;
     return hero.health <= 0;
   }
+
   function heal(n) {
     const cap = ctx.upgrades?.has('m_health') ? 150 : TUNE.heroMaxHp;
     hero.health = Math.min(cap, hero.health + n);
   }
+
   hero.update = update;
   hero.hurt = hurt;
   hero.heal = heal;

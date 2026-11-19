@@ -1,4 +1,5 @@
-// SOLMAR — the crowd: pedestrians stroll the pavements, cross roads, flee danger.
+// SOLMAR — the crowd: pedestrians stroll the pavements, cross roads,
+// and run from danger. Seven shirt colors cycle through the crowd.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
@@ -9,6 +10,7 @@ export function runCrowd(scene, city, rng) {
   const torsoGeo = new THREE.BoxGeometry(0.7, 1.1, 0.4);
   const headGeo = new THREE.SphereGeometry(0.32, 8, 8);
   const legsGeo = new THREE.BoxGeometry(0.6, 0.8, 0.35);
+
   for (let i = 0; i < TUNE.crowdCount; i++) {
     const figure = new THREE.Group();
     const shirt = new THREE.MeshLambertMaterial({ color: SHIRTS[i % SHIRTS.length] });
@@ -36,9 +38,11 @@ export function runCrowd(scene, city, rng) {
       side: rng.choose([-7.5, 7.5]),
     });
   }
+
   function update(dt, ctx) {
     const danger = ctx.dangerPos;
     for (const p of peds) {
+      // A gunshot or a crash nearby spooks them into a sprint.
       let spooked = false;
       if (danger) {
         const d = Math.hypot(p.x - danger.x, p.z - danger.z);
@@ -50,6 +54,7 @@ export function runCrowd(scene, city, rng) {
         p.x += pace * p.dir * dt;
         if (p.x > 184) { p.x = 184; p.dir = -1; }
         if (p.x < -184) { p.x = -184; p.dir = 1; }
+        // Drift back onto the pavement beside the nearest avenue.
         const road = TUNE.avenues.reduce((a, r) => Math.abs(r - p.z) < Math.abs(a - p.z) ? r : a, TUNE.avenues[0]);
         p.z += (road + p.side - p.z) * Math.min(1, dt);
       } else {
@@ -63,9 +68,10 @@ export function runCrowd(scene, city, rng) {
       p.mesh.rotation.y = p.axis === 'x'
         ? (p.dir > 0 ? Math.PI / 2 : -Math.PI / 2)
         : (p.dir > 0 ? 0 : Math.PI);
-      // A small walking bob.
+      // A small walking bob, tied to position so it never jumps.
       p.mesh.position.y = Math.abs(Math.sin((p.x + p.z) * 2.2)) * 0.06;
     }
   }
+
   return { peds, update };
 }

@@ -2,6 +2,8 @@
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
+// The specs live in the tuning file; this module is just the alias the
+// rest of the game imports.
 export const CAR_DEFS = TUNE.cars;
 
 export function buildCarMesh(def) {
@@ -15,6 +17,7 @@ export function buildCarMesh(def) {
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.65, 2.2), glass);
   cabin.position.set(0, 1.3, -0.2);
   car.add(cabin);
+  // The Vantara's rear wing, the trucks' cargo boxes, the taxi's roof sign.
   if (def.key === 'vantara') {
     const wing = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.4), trim);
     wing.position.set(0, 1.25, -2.1);
@@ -33,6 +36,7 @@ export function buildCarMesh(def) {
     roofSign.position.set(0, 1.75, -0.2);
     car.add(roofSign);
   }
+  // Four wheels, two headlights, two taillights.
   const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
   for (const [x, z] of [[-1, 1.5], [1, 1.5], [-1, -1.5], [1, -1.5]]) {

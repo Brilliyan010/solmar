@@ -1,7 +1,9 @@
-// SOLMAR — a living sky: the four day phases, rain, marina boats, gulls, moon.
+// SOLMAR — a living sky: four day phases, rain, marina boats, gulls, moon.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 
+// Dawn, Golden Hour, Dusk, Neon Night — each with its own sun, sky, and
+// whether the lamps and neon boards are lit.
 const DAY_PHASES = [
   { name: 'Dawn', sun: 0xffb36b, sunI: 1.1, hemi: 0x8a7a9a, fog: 0xd8a080, sky: 0xe8a06a, lamp: false },
   { name: 'Golden Hour', sun: 0xff9a3d, sunI: 1.6, hemi: 0x9a8a7a, fog: 0xe8b088, sky: 0xf2a35e, lamp: false },
@@ -17,6 +19,7 @@ export function runSky(scene, city, rng) {
   scene.add(hemi);
   scene.fog = new THREE.Fog(0xe8b088, 180, 520);
   scene.background = new THREE.Color(0xf2a35e);
+
   // A pale moon that only shows at night.
   const moon = new THREE.Mesh(
     new THREE.SphereGeometry(9, 12, 12),
@@ -25,6 +28,7 @@ export function runSky(scene, city, rng) {
   moon.position.set(-160, 120, -260);
   moon.visible = false;
   scene.add(moon);
+
   // Boats moored in the marina.
   const boats = [];
   const hullMat = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
@@ -43,6 +47,7 @@ export function runSky(scene, city, rng) {
     scene.add(boat);
     boats.push(boat);
   }
+
   // Gulls circling over the beach.
   const gulls = [];
   const gullMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -58,7 +63,8 @@ export function runSky(scene, city, rng) {
       sp: rng.between(0.1, 0.25),
     });
   }
-  // Rain: a single Points cloud, hidden until the weather turns.
+
+  // Rain: one Points cloud, hidden until the weather turns.
   const rainGeo = new THREE.BufferGeometry();
   const rainN = 700;
   const rainPos = new Float32Array(rainN * 3);
@@ -74,6 +80,7 @@ export function runSky(scene, city, rng) {
   );
   rain.visible = false;
   scene.add(rain);
+
   const at = {
     clock: 18,
     phase: 1,
@@ -81,6 +88,7 @@ export function runSky(scene, city, rng) {
     rainT: 40,
     phaseName: 'Golden Hour',
   };
+
   function applyPhase(i) {
     const ph = DAY_PHASES[i];
     at.phaseName = ph.name;
@@ -98,8 +106,10 @@ export function runSky(scene, city, rng) {
       city.lighthouseLamp.material.color.setHex(ph.lamp ? 0xffe9a8 : 0x8a7a5a);
     }
   }
+
   // Remember each neon board's true color (daylight dims them).
   for (const s of city.neonSigns) s.userData.c = s.material.color.getHex();
+
   function update(dt, ctx) {
     at.clock += (dt * 24) / TUNE.daySeconds;
     if (at.clock >= 24) at.clock -= 24;
@@ -141,6 +151,7 @@ export function runSky(scene, city, rng) {
     }
     city.beacon.material.color.setHex(Math.floor(t * 1.5) % 2 ? 0xff2222 : 0x881111);
   }
+
   applyPhase(1);
   at.update = update;
   return at;

@@ -22,6 +22,7 @@ import { runSky } from './atmosphere.js';
 import { runSave } from './save.js';
 import { stageShots } from './shots.js';
 
+// Ten Sun Coins scattered across the city.
 const COINS = [
   { x: 60, z: 196 }, { x: -62, z: -70 }, { x: -178, z: 100 }, { x: 93, z: 28 },
   { x: -124, z: 120 }, { x: 31, z: -150 }, { x: 155, z: 150 }, { x: -155, z: -60 },
@@ -35,6 +36,7 @@ export function buildGame(canvas, seed = 1) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 900);
 
+  // Every system, built in dependency order on one shared context.
   const ctx = { rng: seedRng(seed), rain: false, dangerPos: null, state: 'menu' };
   ctx.city = raiseCity(scene, ctx.rng);
   ctx.player = spawnHero(scene, ctx.city);
@@ -175,6 +177,7 @@ export function buildGame(canvas, seed = 1) {
       ctx.hud.showMenu('none');
     }
   }
+
   function onEnter() {
     ctx.audio.ensure();
     if (g.state === 'menu') {
@@ -186,6 +189,7 @@ export function buildGame(canvas, seed = 1) {
       respawn();
     }
   }
+
   function onPause() {
     if (g.state === 'playing' || g.state === 'complete') {
       g.state = 'paused';
@@ -197,6 +201,7 @@ export function buildGame(canvas, seed = 1) {
       ctx.hud.showMenu('none');
     }
   }
+
   function busted(wasted) {
     if (g.state !== 'playing' && g.state !== 'complete') return;
     g.state = wasted ? 'wasted' : 'busted';
@@ -215,6 +220,7 @@ export function buildGame(canvas, seed = 1) {
     }
     ctx.audio.sting('boss');
   }
+
   function respawn() {
     ctx.player.health = ctx.upgrades.has('m_health') ? 150 : TUNE.heroMaxHp;
     ctx.player.armor = ctx.upgrades.has('m_vest') ? 50 : 0;
@@ -226,6 +232,7 @@ export function buildGame(canvas, seed = 1) {
     ctx.state = 'playing';
     ctx.hud.showMenu('none');
   }
+
   function onCarKey() {
     if (g.state !== 'playing' && g.state !== 'complete') return;
     if (ctx.driving.vehicle) {
@@ -248,6 +255,7 @@ export function buildGame(canvas, seed = 1) {
       ctx.hud.toast(`Driving ${v.def.name} — W/S gas, Space handbrake`);
     }
   }
+
   function buyNextGun() {
     const order = ['shotgun', 'smg'];
     for (const key of order) {
@@ -261,6 +269,7 @@ export function buildGame(canvas, seed = 1) {
     }
     ctx.hud.toast('IRONWORKS — you own every gun. Press U for upgrades.');
   }
+
   function tryInteract() {
     if (g.state !== 'playing' && g.state !== 'complete') return;
     const p = ctx.player;
@@ -286,6 +295,7 @@ export function buildGame(canvas, seed = 1) {
     }
     ctx.hud.toast('Nothing to interact with here — try the race markers (cyan) or shops');
   }
+
   // ---- Dynamic menus: upgrades and missions ----
   function buildUpgradeMenu() {
     const list = document.getElementById('upgrades-list');
@@ -306,6 +316,7 @@ export function buildGame(canvas, seed = 1) {
       info.textContent = `Money $${ctx.economy.money} • Relics ${ctx.upgrades.relicsFound.size}/12 • Cred ${ctx.upgrades.CRED_TITLES[ctx.upgrades.rank()]} (${ctx.upgrades.cred})`;
     }
   }
+
   function buildMissionMenu() {
     const list = document.getElementById('missions-list');
     if (!list) return;
@@ -337,6 +348,7 @@ export function buildGame(canvas, seed = 1) {
     addSideJob('Side: Vigilante ($800)', () => ctx.activities.startVigilante());
     addSideJob('Side: Taxi Job ($120)', () => ctx.economy.startTaxi());
   }
+
   function wireButtons() {
     const on = (id, fn) => {
       const el = document.getElementById(id);
@@ -475,13 +487,16 @@ export function buildGame(canvas, seed = 1) {
     ctx.hud.update(dt);
     updateCamera(dt);
   }
+
   function render() {
     renderer.render(scene, camera);
   }
+
   function debugState() {
     const p = ctx.player;
     return `state=${g.state} x=${p.x.toFixed(1)} z=${p.z.toFixed(1)} hp=${Math.round(p.health)} wanted=${ctx.police.wanted} money=${ctx.economy.money} mission=${ctx.missions.active >= 0 ? ctx.missions.defs[ctx.missions.active].name : 'none'} car=${ctx.driving.vehicle ? ctx.driving.vehicle.def.name : 'none'} speed=${ctx.driving.vehicle ? Math.round(Math.abs(ctx.driving.vehicle.speed) * 3.6) : 0} cred=${ctx.upgrades.cred} relics=${ctx.upgrades.relicsFound.size}`;
   }
+
   g.step = step;
   g.render = render;
   g.debugState = debugState;

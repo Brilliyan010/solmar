@@ -1,6 +1,10 @@
 // SOLMAR — combat: fists, pistol, shotgun, SMG, and Kessler's guard AI.
+// Shots are rays from Mara's facing: the nearest thing on the ray takes
+// the hit. Guards walk toward her and shoot back.
 import * as THREE from 'three';
 
+// The arsenal: damage, shots per second, reach, magazine, auto-fire, and
+// how many pellets a shell throws.
 const ARSENAL = {
   fists: { name: 'Fists', dmg: 12, rate: 2.2, range: 2.6, mag: Infinity, auto: false },
   pistol: { name: 'Pistol', dmg: 20, rate: 3.5, range: 42, mag: 12, auto: false },
@@ -19,6 +23,7 @@ export function runCombat(scene, ctx) {
   };
   const guardTorso = new THREE.BoxGeometry(0.8, 1.15, 0.45);
   const guardHeadGeo = new THREE.SphereGeometry(0.33, 8, 8);
+
   function spawnGuard(x, z, opts = {}) {
     const figure = new THREE.Group();
     const torso = new THREE.Mesh(
@@ -52,6 +57,8 @@ export function runCombat(scene, ctx) {
     c.guards.push(guard);
     return guard;
   }
+
+  // Hurt a guard; on death he falls over and pays a small bounty.
   function damageGuard(guard, n) {
     guard.hp -= n;
     ctx.effects?.flash(guard.x, 1.4, guard.z);
@@ -64,6 +71,7 @@ export function runCombat(scene, ctx) {
     }
     return false;
   }
+
   function shoot() {
     if (c.cooldown > 0) return;
     const w = ARSENAL[c.current];
@@ -72,6 +80,8 @@ export function runCombat(scene, ctx) {
     const rateMul = up?.has('w_rate') ? 1.3 : 1;
     c.cooldown = 1 / (w.rate * rateMul);
     const p = ctx.player;
+
+    // Fists: everything in arm's reach, guards and the boss alike.
     if (c.current === 'fists') {
       ctx.audio?.shot('punch');
       for (const gd of c.guards) {
@@ -91,6 +101,7 @@ export function runCombat(scene, ctx) {
     c.ammo--;
     ctx.audio?.shot(c.current);
     ctx.effects?.flash(p.x + Math.sin(p.angle) * 1.2, 1.4, p.z + Math.cos(p.angle) * 1.2);
+    // Each pellet is its own slightly scattered ray.
     const pellets = w.pellets || 1;
     for (let i = 0; i < pellets; i++) {
       const a = p.angle + (Math.random() - 0.5) * (w.pellets ? 0.24 : 0.03);
@@ -115,7 +126,7 @@ export function runCombat(scene, ctx) {
           ctx.police?.addHeat(1, 'kill');
         }
       } else {
-        // The active boss is a bigger target on the same ray.
+        // No guard on the ray: the active boss is a bigger target.
         const boss = ctx.bosses?.active;
         if (boss && boss.hp > 0) {
           const gx = boss.x - p.x;
@@ -126,21 +137,26 @@ export function runCombat(scene, ctx) {
         }
       }
     }
-    if (ctx.police) ctx.police.addHeat(0, 'shot'); // a gunshot is heard
+    // A gunshot is heard even when it hits nothing (heat 0, but the
+    // danger position still spooks the crowd).
+    if (ctx.police) ctx.police.addHeat(0, 'shot');
     ctx.dangerPos = { x: p.x, z: p.z };
   }
+
   function reload() {
     const w = ARSENAL[c.current];
     const mag = w.mag * (ctx.upgrades?.has('w_mag') ? 1.6 : 1);
     c.ammo = mag;
     ctx.audio?.sting('reload');
   }
+
   function giveWeapon(key) {
     c.current = key;
     const w = ARSENAL[key];
     c.ammo = w.mag * (ctx.upgrades?.has('w_mag') ? 1.6 : 1);
     ctx.player.mesh.getObjectByName('gun').visible = key !== 'fists';
   }
+
   function update(dt) {
     c.cooldown = Math.max(0, c.cooldown - dt);
     const p = ctx.player;
@@ -150,6 +166,7 @@ export function runCombat(scene, ctx) {
       const dz = p.z - gd.z;
       const dist = Math.hypot(dx, dz);
       if (dist > 46) continue;
+      // Close in fast from far away, slow to a walk up close.
       const sp = gd.speed * (dist > 14 ? 1 : 0.4);
       gd.x += (dx / dist) * sp * dt;
       gd.z += (dz / dist) * sp * dt;
@@ -163,9 +180,10 @@ export function runCombat(scene, ctx) {
         if (Math.random() < 0.55 && p.hurt(gd.dmg)) ctx.onWasted?.();
       }
     }
-    // Drop dead guards that are far away.
+    // Drop dead guards that are far away (the ones nearby stay as scenery).
     c.guards = c.guards.filter((gd) => !gd.dead || Math.hypot(gd.x - p.x, gd.z - p.z) < 60);
   }
+
   c.spawnGuard = spawnGuard;
   c.shoot = shoot;
   c.reload = reload;

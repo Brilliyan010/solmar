@@ -1,7 +1,9 @@
-// SOLMAR — save and load in localStorage (cash, missions, upgrades, relics, bosses).
+// SOLMAR — save and load in localStorage: cash, missions, upgrades,
+// relics, bosses, coins and where Mara was standing.
 const KEY = 'solmar-save-v1';
 
 export function runSave(ctx) {
+  // Snapshot the progression state into one JSON object and store it.
   function save() {
     try {
       const data = {
@@ -19,9 +21,14 @@ export function runSave(ctx) {
       localStorage.setItem(KEY, JSON.stringify(data));
       return true;
     } catch {
+      // Storage can be unavailable (private mode, sandbox): a failed
+      // save is a shrug, not a crash.
       return false;
     }
   }
+
+  // Restore a snapshot into the live systems. Returns the data, or null
+  // when there is nothing saved (or it cannot be read).
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
@@ -49,6 +56,7 @@ export function runSave(ctx) {
       return null;
     }
   }
+
   function wipe() {
     try {
       localStorage.removeItem(KEY);
@@ -56,5 +64,6 @@ export function runSave(ctx) {
       // No storage available — nothing to wipe.
     }
   }
+
   return { save, load, wipe };
 }

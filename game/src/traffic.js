@@ -1,4 +1,5 @@
-// SOLMAR — traffic AI: cars cruise the avenues, stop at red lights, keep distance.
+// SOLMAR — traffic AI: cars cruise the avenues, stop at red lights, and
+// ease off when the car ahead is too close.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 import { CAR_DEFS, spawnVehicle } from './vehicles.js';
@@ -17,7 +18,8 @@ export function runTraffic(scene, city, rng) {
     scene.add(v.mesh);
     cars.push(v);
   }
-  // Traffic lights at the big intersections.
+
+  // Traffic lights at the nine big intersections, all on one clock.
   const lights = [];
   for (const x of [-93, 31, 93]) {
     for (const z of [-93, 31, 93]) {
@@ -36,11 +38,15 @@ export function runTraffic(scene, city, rng) {
       lights.push({ x: x + 6, z: z + 6, lamp, t: rng.between(0, 8) });
     }
   }
+
   let lightClock = 0;
+
   function update(dt, ctx) {
+    // The lights flip every 8 seconds, green then red, city-wide.
     lightClock += dt;
     const green = Math.floor(lightClock / 8) % 2 === 0;
     for (const l of lights) l.lamp.material.color.setHex(green ? 0x33ff55 : 0xff3333);
+
     for (const c of cars) {
       // Red light: stop short of the crossing.
       let stop = false;
@@ -52,7 +58,7 @@ export function runTraffic(scene, city, rng) {
           if (near) { stop = true; break; }
         }
       }
-      // A car ahead too close: ease off.
+      // A car ahead too close: ease off instead of rear-ending it.
       let slow = false;
       for (const o of cars) {
         if (o === c || o.axis !== c.axis) continue;
@@ -72,7 +78,7 @@ export function runTraffic(scene, city, rng) {
         if (c.x > 185) c.x = -185;
         if (c.x < -185) c.x = 185;
       }
-      // Drift gently back onto the lane.
+      // Drift gently back onto the lane of the nearest avenue.
       const road = TUNE.avenues.reduce((a, r) => {
         const d = c.axis === 'z' ? Math.abs(r - c.x) : Math.abs(r - c.z);
         const ad = c.axis === 'z' ? Math.abs(a - c.x) : Math.abs(a - c.z);
@@ -86,5 +92,6 @@ export function runTraffic(scene, city, rng) {
         : (c.dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     }
   }
+
   return { cars, update };
 }

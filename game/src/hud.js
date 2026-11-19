@@ -1,4 +1,6 @@
-// SOLMAR — HUD: cash, health, wanted stars, clock, objective, minimap, boss bar.
+// SOLMAR — HUD: cash, health, wanted stars, clock, objective, minimap,
+// boss bar. The minimap is a 2D canvas: sea, avenue grid, waypoint, job
+// markers, police in blue, Mara as a white arrow.
 import { TUNE } from './config.js';
 
 export function runHud(ctx) {
@@ -6,11 +8,13 @@ export function runHud(ctx) {
   const h = { waypoint: null, boss: null, toastT: 0 };
   const mm = $('minimap');
   const mmc = mm?.getContext('2d');
+
   function setObjective(t) {
     const el = $('objective');
     if (el) el.textContent = t;
   }
   function setWaypoint(w) { h.waypoint = w; }
+
   function toast(msg) {
     const el = $('toast');
     if (!el) return;
@@ -18,6 +22,7 @@ export function runHud(ctx) {
     el.style.opacity = '1';
     h.toastT = 4;
   }
+
   function bossBar(boss) {
     h.boss = boss;
     const bar = $('bossbar');
@@ -30,12 +35,14 @@ export function runHud(ctx) {
     $('bossname').textContent = `${boss.def.name} — ${boss.def.title} (Phase ${boss.phase}/3)`;
     $('bossfill').style.width = `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%`;
   }
+
   function flashMoney() {
     const el = $('money');
     if (!el) return;
     el.style.color = '#7cff5a';
     setTimeout(() => { if (el) el.style.color = ''; }, 300);
   }
+
   function drawMinimap() {
     if (!mmc) return;
     const S = 150;
@@ -59,7 +66,7 @@ export function runHud(ctx) {
       mmc.lineTo(S, (r + 210) * sc);
       mmc.stroke();
     }
-    // Waypoint, taxi fare and courier drop-off.
+    // Waypoint (gold), taxi fare (green) and courier drop-off (pink).
     const mark = (x, z, color, r) => {
       mmc.fillStyle = color;
       mmc.beginPath();
@@ -89,6 +96,7 @@ export function runHud(ctx) {
     mmc.fill();
     mmc.restore();
   }
+
   function update(dt) {
     const p = ctx.player;
     const set = (id, v) => {
@@ -127,6 +135,8 @@ export function runHud(ctx) {
     }
     drawMinimap();
   }
+
+  // Exactly one menu is visible at a time; 'none' means the HUD itself.
   function showMenu(name) {
     for (const id of ['menu-start', 'menu-pause', 'menu-missions', 'menu-upgrades', 'menu-dead']) {
       const el = $(id);
@@ -135,6 +145,7 @@ export function runHud(ctx) {
     const hud = $('hud');
     if (hud) hud.style.display = name === 'none' ? 'block' : 'none';
   }
+
   h.setObjective = setObjective;
   h.setWaypoint = setWaypoint;
   h.toast = toast;

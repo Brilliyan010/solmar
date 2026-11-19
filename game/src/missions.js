@@ -1,6 +1,6 @@
-// SOLMAR — five chained story missions: briefing, waypoint, goal, payout, boss.
-import { TUNE } from './config.js';
-
+// SOLMAR — five chained story missions: briefing, waypoint, goal, payout,
+// boss. Each step is one of four kinds: travel to a waypoint, sabotage a
+// count of containers, defeat a boss, or win a race / clear the guards.
 const STORY = [
   {
     name: 'First Delivery',
@@ -64,6 +64,8 @@ export function runStory(ctx) {
     waypoint: null,
     guardsLeft: 0,
   };
+
+  // Show the current step's text and put its waypoint on the minimap.
   function setObjective(text) {
     ctx.hud?.setObjective(text);
     const def = STORY[m.active];
@@ -75,6 +77,7 @@ export function runStory(ctx) {
       m.waypoint = null;
     }
   }
+
   function refreshObjective() {
     if (m.active < 0) {
       ctx.hud?.setObjective('Free roam — press M for missions, E to interact');
@@ -87,8 +90,10 @@ export function runStory(ctx) {
     if (step.guards) t = `${def.name} — Defeat the port guards (${m.guardsLeft} left)`;
     setObjective(t);
   }
+
   function start(i, c = {}) {
     if (i < 0 || i >= STORY.length) return false;
+    // Missions run in order, unless the caller is a debug/shot driver.
     if (i > 0 && !m.done.has(i - 1) && !c.debug) {
       ctx.hud?.toast(`Finish "${STORY[i - 1].name}" first!`);
       return false;
@@ -103,6 +108,7 @@ export function runStory(ctx) {
     enterStep(0, c);
     return true;
   }
+
   function enterStep(n, c = {}) {
     if (m.active < 0) return false;
     const def = STORY[m.active];
@@ -127,7 +133,9 @@ export function runStory(ctx) {
     refreshObjective();
     return true;
   }
+
   function advance() { enterStep(m.step + 1); }
+
   function complete() {
     const def = STORY[m.active];
     const moneyMul = ctx.upgrades?.relicPerk('money') ? 1.2 : 1;
@@ -151,6 +159,7 @@ export function runStory(ctx) {
     ctx.save?.save();
     refreshObjective();
   }
+
   function update(dt) {
     if (m.active < 0) return;
     const def = STORY[m.active];
@@ -173,7 +182,7 @@ export function runStory(ctx) {
       refreshObjective();
       return;
     }
-    // A race step ends when this race is won.
+    // A race step ends when this race is won; a failed race just waits.
     if (step.race !== undefined) {
       const name = ctx.activities.RACE_COURSES[step.race]?.name;
       if (name && ctx.activities.done.races.has(name)) {
@@ -195,6 +204,8 @@ export function runStory(ctx) {
     // A travel step ends at its waypoint.
     if (step.at && Math.hypot(step.at.x - p.x, step.at.z - p.z) < 7) advance();
   }
+
+  // The E key at the containers: one more sabotaged, with smoke and a sting.
   function sabotage() {
     if (m.active < 0) return false;
     const step = STORY[m.active].steps[m.step];
@@ -206,6 +217,7 @@ export function runStory(ctx) {
     if (m.sabotaged >= step.sabotage) advance();
     return true;
   }
+
   m.start = start;
   m.enterStep = enterStep;
   m.update = update;

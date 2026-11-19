@@ -6,6 +6,7 @@ export function runSound() {
     { name: 'Neon Nights — Synthwave', bpm: 112, root: 174.6 },
     { name: 'Harbor Blues — Chill', bpm: 72, root: 146.8 },
   ];
+
   function ensure() {
     if (a.ctx) {
       if (a.ctx.state === 'suspended') a.ctx.resume();
@@ -58,6 +59,7 @@ export function runSound() {
       a.ctx = null;
     }
   }
+
   function beep(freq, dur, type = 'square', vol = 0.2, slide = 0) {
     if (!a.ctx || a.muted) return;
     const t = a.ctx.currentTime;
@@ -73,6 +75,7 @@ export function runSound() {
     o.start(t);
     o.stop(t + dur + 0.02);
   }
+
   function noise(dur, vol = 0.25, freq = 1200) {
     if (!a.ctx || a.muted) return;
     const t = a.ctx.currentTime;
@@ -92,12 +95,15 @@ export function runSound() {
     g.connect(a.master);
     src.start(t);
   }
+
   function engine(rpm01) {
     if (!a.eng) return;
     a.eng.o.frequency.value = 45 + rpm01 * 130;
     a.eng.g.gain.value = a.muted ? 0 : 0.02 + rpm01 * 0.05;
   }
+
   function siren(on) { a.sirenOn = on; }
+
   function shot(kind) {
     if (kind === 'pistol') noise(0.12, 0.3, 2400);
     else if (kind === 'shotgun') noise(0.25, 0.4, 1400);
@@ -106,10 +112,12 @@ export function runSound() {
     else if (kind === 'punch') beep(140, 0.08, 'sine', 0.3, -60);
     else if (kind === 'dry') beep(900, 0.05, 'square', 0.12);
   }
+
   function crash() {
     noise(0.3, 0.35, 700);
     beep(70, 0.25, 'sine', 0.3, -30);
   }
+
   function sting(name) {
     const seq = {
       mission: [523, 659, 784],
@@ -130,16 +138,20 @@ export function runSound() {
     }[name] || [440];
     seq.forEach((f, i) => setTimeout(() => beep(f, 0.16, 'triangle', 0.2), i * 95));
   }
+
   function radioName() { return STATIONS[a.radioI].name; }
+
   function nextRadio() {
     a.radioI = (a.radioI + 1) % STATIONS.length;
     if (a.radio) a.radio.o.frequency.value = STATIONS[a.radioI].root;
     sting('radio');
   }
+
   function setMuted(m) {
     a.muted = m;
     if (a.master) a.master.gain.value = m ? 0 : 0.5;
   }
+
   function update(dt) {
     if (!a.ctx) return;
     if (a.sirenOn && !a.muted) {
@@ -151,6 +163,7 @@ export function runSound() {
       }
     }
   }
+
   a.ensure = ensure;
   a.engine = engine;
   a.siren = siren;

@@ -1,4 +1,6 @@
-// SOLMAR — a five-star wanted level: patrols, pursuits, roadblocks at 3+, heli at 5.
+// SOLMAR — a five-star wanted level: patrols, pursuits, a roadblock at
+// 3+ stars, and the helicopter at 5. Hide out of sight long enough and
+// the heat cools off one star at a time.
 import * as THREE from 'three';
 import { TUNE } from './config.js';
 import { spawnVehicle } from './vehicles.js';
@@ -8,6 +10,7 @@ export function runPolice(scene, city, rng) {
   const units = [];
   const heli = { mesh: null, angle: 0 };
   const p = { wanted: 0, hidden: 0, roadblocks: [] };
+
   function spawnCruiser(x, z) {
     const v = spawnVehicle(cruiserDef, x, z, 0);
     // Red-and-blue light bar on the roof.
@@ -22,6 +25,8 @@ export function runPolice(scene, city, rng) {
     units.push({ v, state: 'chase', ram: 0 });
     return v;
   }
+
+  // Three cruisers across the road plus a row of cones.
   function spawnRoadblock(x, z, angle) {
     const block = new THREE.Group();
     for (let i = -1; i <= 1; i++) {
@@ -44,6 +49,7 @@ export function runPolice(scene, city, rng) {
     p.roadblocks.push(block);
     return block;
   }
+
   function makeHeli() {
     const craft = new THREE.Group();
     const body = new THREE.Mesh(
@@ -58,6 +64,7 @@ export function runPolice(scene, city, rng) {
     rotor.position.y = 0.9;
     rotor.name = 'rotor';
     craft.add(rotor);
+    // The searchlight cone under the helicopter.
     const beam = new THREE.Mesh(
       new THREE.ConeGeometry(6, 24, 12, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff6b0, transparent: true, opacity: 0.16, side: THREE.DoubleSide }),
@@ -68,16 +75,19 @@ export function runPolice(scene, city, rng) {
     scene.add(craft);
     heli.mesh = craft;
   }
+
+  // Add heat (clamped at 5 stars) and reset the hideout timer.
   function addHeat(n, why) {
     if (p.wanted >= 5) return;
     p.wanted = Math.min(5, p.wanted + n);
     p.hidden = 0;
     if (why) p.lastWhy = why;
   }
+
   function update(dt, ctx) {
     const px = ctx.player.x;
     const pz = ctx.player.z;
-    // Active units follow the star count.
+    // The active unit count follows the star count.
     const want = p.wanted === 0 ? 0 : p.wanted;
     while (units.length < want) {
       const a = rng.between(0, Math.PI * 2);
@@ -138,6 +148,7 @@ export function runPolice(scene, city, rng) {
       }
       v.mesh.position.set(v.x, 0, v.z);
       v.mesh.rotation.y = v.angle;
+      // The light bar strobes red and blue.
       const bar = v.mesh.getObjectByName('copbar');
       if (bar) bar.material.color.setHex(Math.floor(performance.now() / 200) % 2 ? 0xff2233 : 0x2266ff);
       // Ram: shove the player's car, or hurt Mara on foot.
@@ -155,7 +166,7 @@ export function runPolice(scene, city, rng) {
         }
       }
     }
-    // Busted: a cop touches Mara on foot while wanted.
+    // Busted: a cop touches Mara on foot while she is wanted.
     if (p.wanted > 0 && !ctx.driving.vehicle && nearest < 2.2) {
       ctx.onBusted?.();
     }
@@ -172,6 +183,7 @@ export function runPolice(scene, city, rng) {
       p.hidden = 0;
     }
   }
+
   p.units = units;
   p.addHeat = addHeat;
   p.update = update;
