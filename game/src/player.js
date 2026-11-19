@@ -1,121 +1,130 @@
-// Mara Voss on foot: third-person walker with camera-relative WASD, sprint,
-// jump and a simple walk cycle. The mesh faces +X at heading 0, matching the
-// car convention, so heading = atan2(-mz, mx) everywhere.
+// player.js — Mara Voss on foot: third-person movement, sprint, jump,
+// mouse-orbit camera, and the player mesh. Camera is a chase camera
+// that orbits with the mouse and pulls in when a wall is behind it.
 import * as THREE from "three";
-import { CFG } from "./config.js";
+import { CONFIG } from "./config.js";
+import { collideCircle } from "./driving.js";
 
 export class Player {
   constructor(scene) {
     this.scene = scene;
-    this.x = 0;
+    this.x = 56;
+    this.z = 132;
     this.y = 0;
-    this.z = 0;
     this.vy = 0;
-    this.heading = 0;
-    this.health = CFG.playerHealth;
-    this.armor = 0;
-    this.onFoot = true;
-    this.inCar = null; // car state when driving
+    this.heading = Math.PI; // facing north, toward the garage
+    this.camYaw = Math.PI;
+    this.camPitch = 0.32;
+    this.camDist = 7;
+    this.onGround = true;
     this.walkPhase = 0;
-    this.mesh = this.buildMesh();
-    scene.add(this.mesh);
-  }
+    this.moving = false;
 
-  buildMesh() {
     const g = new THREE.Group();
-    g.name = "mara";
-    const jacket = new THREE.MeshStandardMaterial({ color: 0x0e7c7b, roughness: 0.8 });
-    const jeans = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.9 });
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe0ac69, roughness: 0.7 });
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.3, 0.62, 10), jacket);
-    torso.position.y = 1.05;
-    torso.castShadow = true;
-    g.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skin);
-    head.position.y = 1.56;
-    head.castShadow = true;
-    g.add(head);
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: 0x2c1a10, roughness: 0.9 }));
-    hair.position.y = 1.6;
-    g.add(hair);
-    const legGeo = new THREE.BoxGeometry(0.16, 0.62, 0.16);
-    legGeo.translate(0, -0.31, 0); // pivot at the hip
-    const legL = new THREE.Mesh(legGeo, jeans);
-    legL.position.set(0, 0.67, 0.12);
-    const legR = new THREE.Mesh(legGeo, jeans);
-    legR.position.set(0, 0.67, -0.12);
-    g.add(legL, legR);
-    const armGeo = new THREE.BoxGeometry(0.13, 0.55, 0.13);
-    armGeo.translate(0, -0.27, 0); // pivot at the shoulder
-    const armL = new THREE.Mesh(armGeo, jacket);
-    armL.position.set(0, 1.38, 0.36);
-    const armR = new THREE.Mesh(armGeo, jacket);
-    armR.position.set(0, 1.38, -0.36);
-    g.add(armL, armR);
-    g.userData = { legL, legR, armL, armR, torso };
-    return g;
+    // Coral jacket, dark hair, jeans — Mara's look.
+    const jacket = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10),
+      new THREE.MeshLambertMaterial({ color: 0xe2574c }),
+    );
+    jacket.position.y = 1.05;
+    jacket.castShadow = true;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.27, 12, 10),
+      new THREE.MeshLambertMaterial({ color: 0xe8b88a }),
+    );
+    head.position.y = 1.78;
+    const hair = new THREE.Mesh(
+      new THREE.SphereGeometry(0.29, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshLambertMaterial({ color: 0x2a1a12 }),
+    );
+    hair.position.y = 1.84;
+    const legL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.62, 0.18),
+      new THREE.MeshLambertMaterial({ color: 0x2a3a5a }),
+    );
+    legL.position.set(-0.15, 0.31, 0);
+    const legR = legL.clone();
+    legR.position.x = 0.15;
+    const armL = new THREE.Mesh(
+      new THREE.BoxGeometry(0.13, 0.6, 0.13),
+      new THREE.MeshLambertMaterial({ color: 0xe2574c }),
+    );
+    armL.position.set(-0.48, 1.15, 0);
+    const armR = armL.clone();
+    armR.position.x = 0.48;
+    g.add(jacket, head, hair, legL, legR, armL, armR);
+    g.position.set(this.x, 0, this.z);
+    scene.add(g);
+    this.mesh = g;
+    this.legs = [legL, legR];
+    this.arms = [armL, armR];
   }
 
-  // input: { fwd, strafe } in camera space (-1..1), sprint, jump.
-  // camFwd: THREE.Vector3 camera forward projected on XZ, normalised.
-  updateOnFoot(dt, input, camFwd) {
-    const right = new THREE.Vector3().crossVectors(camFwd, new THREE.Vector3(0, 1, 0));
-    const mx = camFwd.x * input.fwd + right.x * input.strafe;
-    const mz = camFwd.z * input.fwd + right.z * input.strafe;
-    const len = Math.hypot(mx, mz);
-    const speed = input.sprint ? CFG.sprintSpeed : CFG.walkSpeed;
-    if (len > 0.01) {
-      this.x += (mx / len) * speed * dt;
-      this.z += (mz / len) * speed * dt;
-      this.heading = Math.atan2(-mz, mx);
+  update(dt, input, colliders, camera) {
+    // Mouse orbit.
+    this.camYaw -= input.mouseDX * 0.0032;
+    this.camPitch = Math.max(-0.1, Math.min(1.1, this.camPitch + input.mouseDY * 0.0024));
+
+    const k = input.keys;
+    let fx = 0;
+    let fz = 0;
+    if (k.has("KeyW")) fz -= 1;
+    if (k.has("KeyS")) fz += 1;
+    if (k.has("KeyA")) fx -= 1;
+    if (k.has("KeyD")) fx += 1;
+    const len = Math.hypot(fx, fz);
+    this.moving = len > 0;
+    const sprint = k.has("ShiftLeft") || k.has("ShiftRight");
+    const speed = sprint ? CONFIG.sprintSpeed : CONFIG.walkSpeed;
+    if (len > 0) {
+      fx /= len;
+      fz /= len;
+      const sin = Math.sin(this.camYaw);
+      const cos = Math.cos(this.camYaw);
+      const mx = fx * cos - fz * sin;
+      const mz = fx * sin + fz * cos;
+      const nx = this.x + mx * speed * dt;
+      const nz = this.z + mz * speed * dt;
+      const [cx, cz] = collideCircle(nx, nz, CONFIG.playerRadius, colliders);
+      this.x = cx;
+      this.z = cz;
+      this.heading = Math.atan2(mx, mz);
       this.walkPhase += dt * speed * 1.6;
     }
+
     // Jump + gravity.
-    if (input.jump && this.y === 0) this.vy = CFG.jumpSpeed;
-    if (this.y > 0 || this.vy !== 0) {
-      this.vy -= CFG.gravity * dt;
-      this.y += this.vy * dt;
-      if (this.y <= 0) {
-        this.y = 0;
-        this.vy = 0;
-      }
+    if (k.has("Space") && this.onGround) {
+      this.vy = CONFIG.jumpSpeed;
+      this.onGround = false;
     }
-    // City bounds.
-    const B = 360;
-    this.x = Math.max(-B, Math.min(B, this.x));
-    this.z = Math.max(-B, Math.min(B, this.z));
-    // Animate: legs and arms swing forward/back around the lateral (Z) axis.
-    const swing = len > 0.01 ? Math.sin(this.walkPhase) * 0.7 : 0;
-    const u = this.mesh.userData;
-    u.legL.rotation.z = swing;
-    u.legR.rotation.z = -swing;
-    u.armL.rotation.z = -swing * 0.8;
-    u.armR.rotation.z = swing * 0.8;
+    this.vy -= CONFIG.gravity * dt;
+    this.y += this.vy * dt;
+    if (this.y <= 0) { this.y = 0; this.vy = 0; this.onGround = true; }
+
+    // Animate limbs.
+    const swing = this.moving ? Math.sin(this.walkPhase) * 0.55 : 0;
+    this.legs[0].rotation.x = swing;
+    this.legs[1].rotation.x = -swing;
+    this.arms[0].rotation.x = -swing * 0.8;
+    this.arms[1].rotation.x = swing * 0.8;
+
     this.mesh.position.set(this.x, this.y, this.z);
     this.mesh.rotation.y = this.heading;
-    return len > 0.01;
+
+    // Chase camera.
+    const cd = this.camDist;
+    const cx = this.x - Math.sin(this.camYaw) * Math.cos(this.camPitch) * cd;
+    const cz = this.z - Math.cos(this.camYaw) * Math.cos(this.camPitch) * cd;
+    const cy = this.y + 1.8 + Math.sin(this.camPitch) * cd;
+    camera.position.set(cx, Math.max(0.6, cy), cz);
+    camera.lookAt(this.x, this.y + 1.5, this.z);
   }
 
-  damage(amount) {
-    let rest = amount;
-    if (this.armor > 0) {
-      const absorbed = Math.min(this.armor, rest);
-      this.armor -= absorbed;
-      rest -= absorbed;
-    }
-    this.health -= rest;
-    return this.health <= 0;
-  }
-
-  heal(amount) {
-    this.health = Math.min(CFG.playerHealth, this.health + amount);
-  }
-
-  hide() {
-    this.mesh.visible = false;
-  }
-
-  show() {
-    this.mesh.visible = true;
+  teleport(x, z) {
+    this.x = x;
+    this.z = z;
+    this.y = 0;
+    this.vy = 0;
+    this.mesh.position.set(x, 0, z);
   }
 }

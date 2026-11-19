@@ -1,166 +1,181 @@
-// Combat: fists, pistol and shotgun (hitscan), Kessler guards with simple
-// AI, and line-of-sight checks against the city so walls actually block
-// bullets. Enemies are plain figures; the boss (Dario Kessler) just has more
-// health and a faster trigger finger.
+// combat.js — fists, pistol, shotgun and the Kessler guards who shoot
+// back. Shooting is a ray test against guards and police cars; guards
+// are simple state machines (idle / chase / shoot / dead) with a
+// fall-over death. The player takes damage through the game callback,
+// which owns health, armor, the vignette and the WASTED screen.
 import * as THREE from "three";
-import { CFG } from "./config.js";
-import { Rng } from "./rng.js";
+import { CONFIG } from "./config.js";
+import { makeRng, pick } from "./rng.js";
 
-// Sampled line-of-sight: true when no building AABB blocks the segment.
-export function hasLineOfSight(ax, az, bx, bz, colliders) {
-  for (let i = 1; i < 14; i++) {
-    const t = i / 14;
-    const x = ax + (bx - ax) * t;
-    const z = az + (bz - az) * t;
-    for (const c of colliders) {
-      if (x > c.minX - 0.4 && x < c.maxX + 0.4 && z > c.minZ - 0.4 && z < c.maxZ + 0.4) return false;
-    }
-  }
-  return true;
-}
+export const WEAPONS = {
+  fists: { name: "Fists", damage: CONFIG.punchDamage, range: 2.4, rate: 0.45, auto: false },
+  pistol: { name: "Pistol", damage: CONFIG.pistolDamage, range: 55, rate: 0.28, auto: false },
+  shotgun: { name: "Shotgun", damage: CONFIG.shotgunDamage, range: 26, rate: 0.9, auto: false, pellets: 6, spread: 0.09 },
+};
 
 export class Combat {
-  constructor(scene, colliders, seed) {
+  constructor(scene) {
     this.scene = scene;
-    this.colliders = colliders;
-    this.rng = new Rng(seed ^ 0x3c3c);
-    this.enemies = [];
+    this.rng = makeRng(CONFIG.seed + 404);
     this.weapon = "fists";
-    this.owned = new Set(["fists"]);
-    this.lastShotAt = -99;
-    this.time = 0;
-    this.onPlayerHit = null; // (damage) => void, wired by game.js
+    this.ammo = { pistol: 48, shotgun: 18 };
+    this.cooldown = 0;
+    this.guards = [];
+    this.tracers = [];
   }
 
-  buildGuardMesh(boss) {
+  hasWeapon(id) {
+    if (id === "fists") return true;
+    return (this.ammo[id] ?? 0) > 0 || id === "pistol" && this.unlockedPistol;
+  }
+
+  unlock(id) {
+    if (id === "pistol") this.unlockedPistol = true;
+    if (id === "shotgun") this.unlockedShotgun = true;
+  }
+
+  select(id) {
+    if (id === "fists") this.weapon = "fists";
+    if (id === "pistol" && this.unlockedPistol) this.weapon = "pistol";
+    if (id === "shotgun" && this.unlockedShotgun) this.weapon = "shotgun";
+  }
+
+  spawnGuard(x, z) {
     const g = new THREE.Group();
-    const suit = new THREE.MeshStandardMaterial({ color: boss ? 0x6b1a1a : 0x222226, roughness: 0.85 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 1.0, 8), suit);
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34, 0.4, 1.0, 10),
+      new THREE.MeshLambertMaterial({ color: 0x3a3a3a }),
+    );
     body.position.y = 1.0;
     body.castShadow = true;
-    g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshStandardMaterial({ color: 0xd8a077, roughness: 0.7 }));
-    head.position.y = 1.68;
-    g.add(head);
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.09, 0.09), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-    gun.position.set(0.3, 1.25, 0);
-    g.add(gun);
-    g.userData.gun = gun;
-    return g;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.26, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0xd8a888 }),
+    );
+    head.position.y = 1.78;
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.28, 0.12, 10),
+      new THREE.MeshLambertMaterial({ color: 0x1a1a1a }),
+    );
+    cap.position.y = 1.98;
+    const gun = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.1, 0.7),
+      new THREE.MeshLambertMaterial({ color: 0x111111 }),
+    );
+    gun.position.set(0.3, 1.3, -0.4);
+    g.add(body, head, cap, gun);
+    g.position.set(x, 0, z);
+    this.scene.add(g);
+    const guard = { mesh: g, x, z, health: CONFIG.guardHealth, state: "idle", shootCd: 0, dead: false, fallT: 0 };
+    this.guards.push(guard);
+    return guard;
   }
 
-  spawnGuard(x, z, boss = false) {
-    const mesh = this.buildGuardMesh(boss);
-    mesh.position.set(x, 0, z);
-    this.scene.add(mesh);
-    const e = {
-      mesh, x, z, boss,
-      hp: boss ? CFG.bossHealth : CFG.guardHealth,
-      heading: 0, shootAt: this.time + this.rng.range(0.6, 1.6),
-      dead: false, deadAt: 0,
-    };
-    this.enemies.push(e);
-    return e;
+  clearGuards() {
+    for (const g of this.guards) this.scene.remove(g.mesh);
+    this.guards = [];
   }
 
-  clearEnemies() {
-    for (const e of this.enemies) this.scene.remove(e.mesh);
-    this.enemies = [];
+  // Fire the current weapon from (ox,oy,oz) along direction (dx,dz).
+  // ctx: { guards, policeCars, trafficCars, effects, audio, onHitGuard,
+  //   onKillGuard, onWanted, cameraForward }.
+  fire(ox, oy, oz, dx, dz, ctx) {
+    if (this.cooldown > 0) return false;
+    const w = WEAPONS[this.weapon];
+    if (this.weapon !== "fists" && (this.ammo[this.weapon] ?? 0) <= 0) {
+      ctx.audio?.click();
+      this.cooldown = 0.3;
+      return false;
+    }
+    this.cooldown = w.rate;
+    if (this.weapon !== "fists") this.ammo[this.weapon]--;
+    ctx.audio?.shoot(this.weapon);
+    ctx.effects?.muzzle(ox + dx * 1.2, oy, oz + dz * 1.2);
+
+    const pellets = w.pellets ?? 1;
+    for (let i = 0; i < pellets; i++) {
+      const spread = w.spread ? (this.rng() - 0.5) * 2 * w.spread : 0;
+      const px = dx * Math.cos(spread) - dz * Math.sin(spread);
+      const pz = dx * Math.sin(spread) + dz * Math.cos(spread);
+      this.rayHit(ox, oz, px, pz, w, ctx);
+    }
+    return true;
   }
 
-  aliveCount() {
-    return this.enemies.filter((e) => !e.dead).length;
-  }
-
-  // Hitscan shot from origin along dir (unit Vector3). Returns the enemy hit
-  // (if any) plus the end point for the tracer effect.
-  shoot(origin, dir) {
-    const now = this.time;
-    const rate = this.weapon === "shotgun" ? CFG.shotgunRate : this.weapon === "pistol" ? CFG.pistolRate : 0.4;
-    if (now - this.lastShotAt < rate) return null;
-    this.lastShotAt = now;
-    const range = this.weapon === "shotgun" ? CFG.shotgunRange : this.weapon === "pistol" ? CFG.pistolRange : CFG.fistRange;
-    const pellets = this.weapon === "shotgun" ? CFG.shotgunPellets : 1;
+  rayHit(ox, oz, dx, dz, w, ctx) {
+    // Nearest guard hit along the ray (2D, generous radius).
     let best = null;
-    let bestT = range;
-    for (let p = 0; p < pellets; p++) {
-      const d = dir.clone();
-      if (this.weapon === "shotgun") {
-        d.x += this.rng.range(-0.06, 0.06);
-        d.z += this.rng.range(-0.06, 0.06);
-        d.normalize();
-      }
-      for (const e of this.enemies) {
-        if (e.dead) continue;
-        // Ray vs vertical capsule approximated as a sphere at chest height.
-        const cx = e.x - origin.x;
-        const cy = 1.1 - origin.y;
-        const cz = e.z - origin.z;
-        const t = cx * d.x + cy * d.y + cz * d.z;
-        if (t < 0 || t > range) continue;
-        const px = origin.x + d.x * t;
-        const py = origin.y + d.y * t;
-        const pz = origin.z + d.z * t;
-        const dist = Math.hypot(px - e.x, py - 1.1, pz - e.z);
-        if (dist < 0.95 && t < bestT && hasLineOfSight(origin.x, origin.z, e.x, e.z, this.colliders)) {
-          bestT = t;
-          best = e;
-        }
-      }
+    let bestD = w.range;
+    for (const g of this.guards) {
+      if (g.dead) continue;
+      const rx = g.x - ox;
+      const rz = g.z - oz;
+      const along = rx * dx + rz * dz;
+      if (along < 0 || along > bestD) continue;
+      const perp = Math.abs(rx * dz - rz * dx);
+      if (perp < 1.1) { best = g; bestD = along; }
     }
-    const end = origin.clone().addScaledVector(dir, best ? bestT : range);
     if (best) {
-      const dmg = this.weapon === "shotgun" ? CFG.shotgunDamage : this.weapon === "pistol" ? CFG.pistolDamage : CFG.fistDamage;
-      best.hp -= dmg;
-      if (best.hp <= 0) {
+      best.health -= w.damage;
+      ctx.effects?.blood(best.x, 1.2, best.z);
+      if (best.health <= 0) {
         best.dead = true;
-        best.deadAt = now;
-        best.mesh.rotation.z = Math.PI / 2;
-        best.mesh.position.y = 0.3;
+        best.fallT = 0;
+        ctx.onKillGuard?.(best);
+      } else {
+        ctx.onHitGuard?.(best);
+      }
+      return;
+    }
+    // Police cars can be shot too (raises wanted).
+    for (const c of ctx.policeCars ?? []) {
+      const rx = c.x - ox;
+      const rz = c.z - oz;
+      const along = rx * dx + rz * dz;
+      if (along < 0 || along > w.range) continue;
+      if (Math.abs(rx * dz - rz * dx) < 1.8) {
+        c.damaged = Math.min(1, (c.damaged ?? 0) + 0.25);
+        ctx.effects?.sparks(c.x, 1, c.z);
+        ctx.onWanted?.(CONFIG.shootWanted);
+        return;
       }
     }
-    return { hit: best, end, range };
   }
 
-  // Fists: same hitscan but short range; called on click when unarmed.
-  punch(origin, dir) {
-    const save = this.weapon;
-    this.weapon = "fists";
-    const r = this.shoot(origin, dir);
-    this.weapon = save;
-    return r;
+  punchTarget(ox, oz, dx, dz, ctx) {
+    return this.fire(ox, 1.2, oz, dx, dz, ctx);
   }
 
-  update(dt, player) {
-    this.time += dt;
-    for (const e of this.enemies) {
-      if (e.dead) continue;
-      const dx = player.x - e.x;
-      const dz = player.z - e.z;
-      const dist = Math.hypot(dx, dz);
-      const los = dist < 46 && hasLineOfSight(e.x, e.z, player.x, player.z, this.colliders);
-      if (los && player.onFoot) {
-        e.heading = Math.atan2(-dz, dx);
-        e.mesh.rotation.y = e.heading;
-        // Close to a firing stance, then shoot.
-        if (dist > 16) {
-          e.x += (dx / dist) * 3.2 * dt;
-          e.z += (dz / dist) * 3.2 * dt;
-          e.mesh.position.set(e.x, 0, e.z);
-        }
-        if (this.time >= e.shootAt) {
-          e.shootAt = this.time + (e.boss ? 0.9 : 1.5) + this.rng.range(0, 0.7);
-          // Hit chance falls with distance; point-blank almost always hits.
-          const p = Math.max(0.12, 0.75 - dist * 0.012);
-          if (this.rng.next() < p && this.onPlayerHit) {
-            this.onPlayerHit(e.boss ? 14 : 9);
-          }
-          e.mesh.userData.gunFlash = 0.08;
-        }
-      } else if (dist > 46) {
-        // Drift back to the post.
-        e.mesh.rotation.y += dt * 0.4;
+  update(dt, ctx) {
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    for (const g of this.guards) {
+      if (g.dead) {
+        g.fallT += dt;
+        g.mesh.rotation.x = Math.min(Math.PI / 2, g.fallT * 4);
+        if (g.fallT > 6) g.mesh.visible = false;
+        continue;
       }
+      const dx = ctx.playerX - g.x;
+      const dz = ctx.playerZ - g.z;
+      const d = Math.hypot(dx, dz);
+      g.shootCd -= dt;
+      if (d < 34) {
+        g.state = "shoot";
+        g.mesh.rotation.y = Math.atan2(dx, dz);
+        if (d > 8) {
+          g.x += (dx / d) * 3.4 * dt;
+          g.z += (dz / d) * 3.4 * dt;
+        }
+        if (g.shootCd <= 0 && d < 30) {
+          g.shootCd = 1.4 + this.rng() * 0.8;
+          ctx.audio?.enemyShot();
+          ctx.effects?.tracer(g.x, 1.3, g.z, ctx.playerX, 1.2, ctx.playerZ);
+          if (this.rng() < 0.55) ctx.onPlayerDamage?.(CONFIG.guardDamage);
+        }
+      } else {
+        g.state = "idle";
+      }
+      g.mesh.position.set(g.x, 0, g.z);
     }
   }
 }

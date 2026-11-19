@@ -1,83 +1,91 @@
-// SOLMAR — Streets of Solmar. Every tuning number lives here so the whole
-// game can be balanced from one file. All distances in metres, speeds in m/s,
-// money in dollars, time in seconds.
-export const CFG = {
-  // City
-  pitch: 62, // distance between road centrelines
-  blocks: 7, // blocks per side (roads = blocks + 1 per axis)
-  roadHalf: 8, // half the road width
-  blockHalf: 23, // half the block size (pitch - 2*roadHalf) / 2
-  groundSize: 760,
+// config.js — every tuning number for SOLMAR lives here, in one place.
+export const CONFIG = {
+  // World layout: streets run along x = +-31, +-93, +-155 (and the same on z).
+  streetOffsets: [-155, -93, -31, 31, 93, 155],
+  streetWidth: 12,
+  sidewalkWidth: 3,
+  worldHalf: 210,
+  seaZ: -196,
+  beachZ: -186,
+
   // Player on foot
-  walkSpeed: 5.2,
-  sprintSpeed: 8.6,
-  jumpSpeed: 7.5,
+  walkSpeed: 6,
+  sprintSpeed: 10,
+  jumpSpeed: 8,
   gravity: 22,
-  playerRadius: 0.55,
-  // Driving
-  driveAccel: 16,
-  driveBrake: 34,
-  driveReverseMax: 11,
-  driveGrip: 2.6, // steering authority
-  handbrakeTurn: 1.9,
-  // Traffic / pedestrians
+  playerRadius: 0.6,
+
+  // Driving (arcade)
+  carAccel: 26,
+  carBrake: 40,
+  carMaxSpeed: 42, // m/s, scaled per car
+  carReverseSpeed: 12,
+  carTurn: 1.9,
+  carGrip: 6,
+  handbrakeGrip: 1.2,
+
+  // Traffic & pedestrians
   trafficCount: 22,
-  pedCount: 36,
   trafficSpeed: 11,
+  pedCount: 36,
+  pedSpeed: 1.6,
+  pedFleeSpeed: 5,
+
   // Wanted
   wantedMax: 5,
-  wantedDecayDelay: 18, // seconds without crime before stars start falling
-  wantedDecayStep: 9, // seconds per star lost while hidden
-  wantedForSteal: 1,
-  wantedForHitPed: 1,
-  wantedForHitCar: 1,
-  wantedForShot: 1,
-  wantedForKillCop: 2,
-  bustedFine: 200,
+  wantedDecaySeconds: 20,
+  stealWanted: 1,
+  hitPedWanted: 2,
+  shootWanted: 1,
+  policeChaseSpeed: 30,
+  heliAtStars: 5,
+  roadblockAtStars: 3,
+
   // Combat
   playerHealth: 100,
-  playerArmorMax: 100,
-  fistDamage: 18,
-  fistRange: 2.4,
-  pistolDamage: 26,
-  pistolRate: 0.22,
-  pistolRange: 70,
-  shotgunDamage: 9,
-  shotgunPellets: 6,
-  shotgunRate: 0.8,
-  shotgunRange: 26,
+  pistolDamage: 34,
+  shotgunDamage: 22, // per pellet, 6 pellets
+  punchDamage: 12,
   guardHealth: 60,
-  bossHealth: 220,
+  guardDamage: 9,
+
   // Economy
-  startMoney: 150,
-  taxiFareMin: 80,
-  taxiFareMax: 160,
-  coinValue: 100,
-  coinCount: 10,
+  missionRewards: [500, 1500, 2500, 4000, 10000],
+  taxiFare: 120,
+  sunCoinValue: 250,
   sprayCost: 150,
   pistolCost: 800,
-  shotgunCost: 1500,
-  armorCost: 300,
-  // Missions
-  missionRewards: [500, 1500, 2500, 4000, 10000],
-  // Clock: one game hour per 150 real seconds, starting at golden hour.
-  clockStartHour: 17.6,
-  clockRate: 1 / 150,
-  // Rendering / loop
-  fixedStep: 1 / 60,
-  minimapSize: 200,
-};
+  shotgunCost: 2500,
+  garageSlots: 3,
 
-// Sun-soaked palette: sand, coral, teal sea, neon magenta/cyan.
-export const PALETTE = {
-  skyTop: 0x2e4a7a,
-  skyHorizon: 0xff9a56,
-  sun: 0xffd9a0,
-  fog: 0xf2a56b,
-  sea: 0x1f7f8c,
-  sand: 0xe8c98f,
-  road: 0x3a3f46,
-  sidewalk: 0x9a938a,
-  grass: 0x5d8a4a,
-  plaza: 0xb8a88e,
+  // Missions
+  missionNames: [
+    "M1 — First Delivery",
+    "M2 — Hot Wheels",
+    "M3 — Harbor Lights",
+    "M4 — Neon Run",
+    "M5 — Payback at the Port",
+  ],
+
+  // Time of day: golden hour, 18:00 start, 1 game minute per 3 real seconds.
+  startClockMinutes: 18 * 60,
+  clockRate: 20,
+
+  // Cars: name, top speed multiplier, acceleration multiplier, colour, kind.
+  cars: [
+    { id: "pipit", name: "Pipit", kind: "hatch", speed: 0.78, accel: 0.85, color: 0x4fae5f, price: 0 },
+    { id: "corto", name: "Corto", kind: "sedan", speed: 0.9, accel: 0.95, color: 0x3a6fd8, price: 0 },
+    { id: "cabrio", name: "Cabrio Taxi", kind: "taxi", speed: 0.86, accel: 0.9, color: 0xffc21a, price: 0 },
+    { id: "mule", name: "Mule", kind: "van", speed: 0.72, accel: 0.8, color: 0xd8d3c8, price: 0 },
+    { id: "vantara", name: "Vantara", kind: "sport", speed: 1.25, accel: 1.2, color: 0xe23a5a, price: 0 },
+    { id: "hauler", name: "Hauler", kind: "truck", speed: 0.66, accel: 0.7, color: 0x8a6f4d, price: 0 },
+  ],
+
+  // Sun Coin spots (10), spread across the districts.
+  sunCoins: [
+    [-150, -150], [150, -150], [-150, 150], [150, 150], [0, -170],
+    [-120, 0], [120, 0], [0, 120], [-62, -62], [62, -120],
+  ],
+
+  seed: 20261117,
 };

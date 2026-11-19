@@ -1,297 +1,297 @@
-// Missions: Mara Voss's five-chapter story. Each mission is a list of steps;
-// the manager watches the world and advances steps as the player completes
-// them. Steps: goto, enterCar, stealCar, sabotage, eliminate, race, escape,
-// deliver. Rewards follow the brief.
-import { CFG } from "./config.js";
-import { PLACES } from "./city.js";
-import { buildCarMesh } from "./vehicles.js";
-import { Rng } from "./rng.js";
+// missions.js — Mara's five-mission story arc against Dario Kessler.
+// Each mission is a list of steps; a step completes by reaching a
+// place, entering a car, sabotaging a container, winning a race leg, or
+// defeating guards. Rewards pay through the economy. The tracker draws
+// the objective text, the 3D waypoint beacon and the minimap blip.
+import * as THREE from "three";
+import { CONFIG } from "./config.js";
+import { makeRng } from "./rng.js";
+import { createCar, carDef } from "./vehicles.js";
 
 const RACE_POINTS = [
-  { x: 31, z: -31 }, { x: 155, z: -31 }, { x: 155, z: 93 },
-  { x: 31, z: 155 }, { x: -93, z: 93 }, { x: -93, z: -93 },
+  [31, -150], [31, 150], [93, 150], [93, -150],
 ];
 
-export const MISSIONS = [
-  {
-    name: "First Delivery",
-    briefing: "Mara's first job back in Solmar: a parcel for Marina Bay. Get wheels, deliver it, come home.",
-    steps: [
-      { kind: "enterCar", text: "Get in a car — any car will do" },
-      { kind: "deliver", x: PLACES.marina.x - 30, z: PLACES.marina.z, r: 12, text: "Deliver the parcel to Marina Bay" },
-      { kind: "goto", x: PLACES.vossAuto.x, z: PLACES.vossAuto.z, r: 9, text: "Return to Voss Auto" },
-    ],
-  },
-  {
-    name: "Hot Wheels",
-    briefing: "Kessler's crew keeps a Vantara locked in his warehouse. Take it — and be ready to run.",
-    steps: [
-      { kind: "goto", x: PLACES.warehouse.x, z: PLACES.warehouse.z, r: 12, text: "Go to Kessler's warehouse in Old Port" },
-      { kind: "stealCar", model: "vantara", x: -88, z: 124, text: "Steal the Vantara (press E)" },
-      { kind: "escape", text: "Escape the police — lose them or reach Spray Shack" },
-      { kind: "goto", x: PLACES.vossAuto.x, z: PLACES.vossAuto.z, r: 9, text: "Bring the Vantara home to Voss Auto" },
-    ],
-  },
-  {
-    name: "Harbor Lights",
-    briefing: "Sabotage Kessler's smuggling containers under cover of the port lights. His guards are watching.",
-    steps: [
-      { kind: "goto", x: PLACES.port.x, z: PLACES.port.z, r: 14, text: "Sneak into Old Port" },
-      { kind: "sabotage", spots: [{ x: -178, z: 128 }, { x: -156, z: 150 }, { x: -190, z: 168 }], text: "Sabotage the containers" },
-      { kind: "eliminate", count: 4, text: "Deal with Kessler's guards" },
-    ],
-  },
-  {
-    name: "Neon Run",
-    briefing: "The Strip's street race pays big. Six checkpoints, three rivals, one winner. Don't lose.",
-    steps: [
-      { kind: "goto", x: PLACES.neonStrip.x, z: PLACES.neonStrip.z, r: 12, text: "Meet the racers on Neon Strip" },
-      { kind: "race", checkpoints: RACE_POINTS, text: "Win the street race" },
-    ],
-  },
-  {
-    name: "Payback at the Port",
-    briefing: "It ends tonight. Kessler, his crew, his HQ — all of it. Bring a gun. Bring two.",
-    steps: [
-      { kind: "goto", x: PLACES.kesslerHQ.x, z: PLACES.kesslerHQ.z, r: 14, text: "Storm Kessler's HQ at the Port" },
-      { kind: "eliminate", count: 7, boss: true, text: "Take down Kessler and his crew" },
-      { kind: "goto", x: PLACES.vossAuto.x, z: PLACES.vossAuto.z, r: 9, text: "Drive home — Solmar is yours" },
-    ],
-  },
-];
+function missionDefs() {
+  return [
+    {
+      name: CONFIG.missionNames[0],
+      briefing: "Kessler's couriers took your last delivery. Take the Pipit and run the package to Marina Bay yourself.",
+      steps: [
+        { kind: "enterCar", text: "Get in a car at Voss Auto" },
+        { kind: "reach", target: [0, -168], text: "Deliver the package to Marina Bay pier" },
+      ],
+    },
+    {
+      name: CONFIG.missionNames[1],
+      briefing: "Kessler keeps a Vantara locked in his warehouse. Steal it — and lose the cops at the Spray Shack.",
+      steps: [
+        { kind: "reach", target: [140, 31], text: "Reach Kessler's warehouse in the Old Port" },
+        { kind: "steal", car: "vantara", text: "Steal the Vantara" },
+        { kind: "reach", target: [-62, 124], text: "Escape the police — reach the Spray Shack" },
+      ],
+    },
+    {
+      name: CONFIG.missionNames[2],
+      briefing: "Kessler's smuggling runs through the Old Port containers. Sabotage three of them — quietly.",
+      steps: [
+        { kind: "reach", target: [120, 0], text: "Sneak into the Old Port container yard" },
+        { kind: "sabotage", count: 3, text: "Sabotage the marked containers (0/3)" },
+        { kind: "reach", target: [62, 124], text: "Get back to Voss Auto" },
+      ],
+    },
+    {
+      name: CONFIG.missionNames[3],
+      briefing: "Neon Strip street race. Three rivals, four checkpoints. Win it and the shotgun is yours.",
+      steps: [
+        { kind: "reach", target: [31, -120], text: "Get to the Neon Strip start line" },
+        { kind: "race", text: "Race! Hit every checkpoint" },
+      ],
+    },
+    {
+      name: CONFIG.missionNames[4],
+      briefing: "This ends tonight. Storm Kessler's warehouse, take down his guards, and settle the debt.",
+      steps: [
+        { kind: "reach", target: [150, 31], text: "Storm Kessler's warehouse" },
+        { kind: "defeat", count: 6, text: "Take down Kessler's guards (0/6)" },
+        { kind: "reach", target: [150, 10], text: "Confront Kessler at his office" },
+      ],
+    },
+  ];
+}
 
-export class MissionManager {
-  constructor(scene, seed) {
+export class Missions {
+  constructor(scene) {
     this.scene = scene;
-    this.rng = new Rng(seed ^ 0x4d49);
-    this.current = 0; // mission index
-    this.done = [false, false, false, false, false];
-    this.active = false;
-    this.stepIndex = 0;
-    this.stepState = null;
-    this.waypoint = null;
-    this.objective = "";
-    this.race = null;
-    this.onMissionComplete = null; // (index, reward) => void
-    this.onStep = null; // (text) => void
+    this.defs = missionDefs();
+    this.active = -1; // index into defs, -1 = free roam
+    this.step = 0;
+    this.completed = [false, false, false, false, false];
+    this.sabotaged = 0;
+    this.defeated = 0;
+    this.racePoint = 0;
+    this.rivals = [];
+    this.rng = makeRng(CONFIG.seed + 505);
+    this.waypoint = null; // [x, z] or null
+    this.beacon = null;
+    this.vantara = null; // the M2 prize car
+    this.sabotageSpots = [];
   }
 
-  get mission() {
-    return MISSIONS[this.current];
+  current() {
+    return this.active >= 0 ? this.defs[this.active] : null;
   }
 
-  start(index) {
-    this.current = index;
-    this.active = true;
-    this.stepIndex = 0;
-    this.stepState = null;
-    this.race = null;
-    this.enterStep(0);
+  currentStep() {
+    const m = this.current();
+    return m ? m.steps[this.step] : null;
   }
 
-  stop() {
-    this.active = false;
-    this.waypoint = null;
-    this.objective = "";
-    this.cleanupRace();
+  objectiveText() {
+    const m = this.current();
+    if (!m) return "Explore Solmar. Steal a car, take a mission, make money.";
+    const s = m.steps[this.step];
+    if (!s) return m.name;
+    if (s.kind === "sabotage") return `Sabotage the marked containers (${this.sabotaged}/${s.count})`;
+    if (s.kind === "defeat") return `Take down Kessler's guards (${this.defeated}/${s.count})`;
+    if (s.kind === "race") return `Race! Checkpoint ${this.racePoint + 1}/4`;
+    return s.text;
   }
 
-  cleanupRace() {
-    if (this.race) {
-      for (const r of this.race.rivals) this.scene.remove(r.mesh);
-      this.race = null;
+  // Beacon: a tall glowing cylinder + ring at the active waypoint.
+  setWaypoint(x, z) {
+    this.waypoint = [x, z];
+    if (!this.beacon) {
+      const g = new THREE.Group();
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8, 0.8, 60, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffd23e, transparent: true, opacity: 0.18, side: THREE.DoubleSide }),
+      );
+      beam.position.y = 30;
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(1.8, 0.18, 8, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffd23e }),
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.3;
+      g.add(beam, ring);
+      this.scene.add(g);
+      this.beacon = g;
     }
+    this.beacon.position.set(x, 0, z);
+    this.beacon.visible = true;
   }
 
-  enterStep(i) {
-    const step = this.mission.steps[i];
-    this.stepIndex = i;
-    this.stepState = { done: 0, sabotaged: [], startedAt: 0 };
-    this.objective = step.text;
-    if (this.onStep) this.onStep(step.text);
-    if (step.kind === "goto" || step.kind === "deliver") {
-      this.waypoint = { x: step.x, z: step.z };
-    } else if (step.kind === "stealCar") {
-      this.waypoint = { x: step.x, z: step.z };
-    } else if (step.kind === "sabotage") {
-      this.waypoint = { x: step.spots[0].x, z: step.spots[0].z };
-    } else if (step.kind === "eliminate") {
-      this.waypoint = { x: this.mission.steps[0].x ?? PLACES.port.x, z: this.mission.steps[0].z ?? PLACES.port.z };
-    } else if (step.kind === "race") {
-      this.waypoint = { x: step.checkpoints[0].x, z: step.checkpoints[0].z };
+  hideWaypoint() {
+    this.waypoint = null;
+    if (this.beacon) this.beacon.visible = false;
+  }
+
+  start(i, ctx = {}) {
+    if (this.completed[i]) return false;
+    this.active = i;
+    this.step = 0;
+    this.sabotaged = 0;
+    this.defeated = 0;
+    this.racePoint = 0;
+    ctx.onToast?.(`${this.defs[i].name}: ${this.defs[i].briefing}`);
+    ctx.audio?.missionStart();
+    this.enterStep(0, ctx);
+    return true;
+  }
+
+  enterStep(i, ctx = {}) {
+    this.step = i;
+    const s = this.currentStep();
+    if (!s) { this.finish(ctx); return; }
+    if (s.kind === "reach" || s.kind === "steal") this.setWaypoint(...(s.target ?? this.vantaraSpot(ctx)));
+    if (s.kind === "sabotage") this.setupSabotage(ctx);
+    if (s.kind === "race") this.setupRace(ctx);
+    if (s.kind === "defeat") this.setupFinale(ctx);
+    if (s.kind === "enterCar") this.setWaypoint(62, 132);
+  }
+
+  vantaraSpot() {
+    return [140, 20];
+  }
+
+  setupSabotage(ctx) {
+    this.sabotaged = 0;
+    this.sabotageSpots = [[118, -8], [132, 22], [108, 48]].map(([x, z]) => ({ x, z, done: false }));
+    for (const sp of this.sabotageSpots) ctx.effects?.mark(sp.x, sp.z);
+    const next = this.sabotageSpots[0];
+    this.setWaypoint(next.x, next.z);
+    ctx.combat?.spawnGuard(126, -2);
+    ctx.combat?.spawnGuard(114, 30);
+    ctx.combat?.spawnGuard(140, 44);
+  }
+
+  setupRace(ctx) {
+    this.racePoint = 0;
+    this.setWaypoint(...RACE_POINTS[0]);
+    // Three rival cars at the start line.
+    const defs = [carDef("corto"), carDef("pipit"), carDef("mule")];
+    this.rivals = defs.map((d, i) => {
+      const c = createCar(d, 31 + (i - 1) * 5, -128, 0, { driver: "rival" });
+      c.racePoint = 0;
+      c.finished = false;
+      this.scene.add(c.mesh);
+      return c;
+    });
+    ctx.audio?.raceStart();
+  }
+
+  setupFinale(ctx) {
+    this.defeated = 0;
+    for (let i = 0; i < 6; i++) {
+      ctx.combat?.spawnGuard(138 + (i % 3) * 9, 22 + Math.floor(i / 3) * 14);
+    }
+    this.setWaypoint(150, 31);
+  }
+
+  // Called by the game when the player presses E near a sabotage container.
+  trySabotage(x, z, ctx) {
+    const s = this.currentStep();
+    if (!s || s.kind !== "sabotage") return false;
+    const spot = this.sabotageSpots.find((sp) => !sp.done && Math.hypot(sp.x - x, sp.z - z) < 5);
+    if (!spot) return false;
+    spot.done = true;
+    this.sabotaged++;
+    ctx.effects?.explosion(spot.x, 1, spot.z);
+    ctx.audio?.explosion();
+    ctx.police?.addWanted(1);
+    if (this.sabotaged >= s.count) {
+      this.advance(ctx);
     } else {
-      this.waypoint = null;
+      const next = this.sabotageSpots.find((sp) => !sp.done);
+      if (next) this.setWaypoint(next.x, next.z);
+    }
+    return true;
+  }
+
+  onGuardKilled(ctx) {
+    const s = this.currentStep();
+    if (s && s.kind === "defeat") {
+      this.defeated++;
+      if (this.defeated >= s.count) this.advance(ctx);
     }
   }
 
-  completeStep(ctx) {
-    this.stepIndex++;
-    if (this.stepIndex >= this.mission.steps.length) {
-      this.completeMission(ctx);
-      return;
+  advance(ctx) {
+    ctx.audio?.stepDone();
+    this.step++;
+    if (this.step >= this.current().steps.length) this.finish(ctx);
+    else this.enterStep(this.step, ctx);
+  }
+
+  finish(ctx) {
+    const i = this.active;
+    this.completed[i] = true;
+    const reward = CONFIG.missionRewards[i];
+    ctx.economy?.addMoney(reward);
+    ctx.onToast?.(`${this.defs[i].name} complete! +$${reward}`);
+    ctx.audio?.missionComplete();
+    if (i === 1) ctx.combat?.unlock("pistol");
+    if (i === 3) ctx.combat?.unlock("shotgun");
+    if (i === 4) ctx.onToast?.("Kessler is finished. Solmar is yours, Mara. — THE END (free roam continues)");
+    this.active = -1;
+    this.hideWaypoint();
+    for (const r of this.rivals) this.scene.remove(r.mesh);
+    this.rivals = [];
+    ctx.combat?.clearGuards();
+    ctx.save?.();
+  }
+
+  update(dt, ctx) {
+    // Pulse the beacon.
+    if (this.beacon?.visible) {
+      const s = 1 + Math.sin(ctx.time * 4) * 0.12;
+      this.beacon.scale.set(s, 1, s);
     }
-    this.enterStep(this.stepIndex);
-  }
-
-  completeMission(ctx) {
-    const reward = CFG.missionRewards[this.current];
-    this.done[this.current] = true;
-    this.active = false;
-    this.waypoint = null;
-    this.objective = "";
-    this.cleanupRace();
-    ctx.economy.money += reward;
-    if (this.onMissionComplete) this.onMissionComplete(this.current, reward);
-  }
-
-  failMission(ctx) {
-    ctx.toast("Mission failed — try again");
-    this.start(this.current);
-  }
-
-  // Spawn helpers the game calls when a step begins.
-  spawnGuards(ctx, count, boss) {
-    const base = this.current === 4 ? PLACES.kesslerHQ : PLACES.port;
-    for (let i = 0; i < count; i++) {
-      const x = base.x + this.rng.range(-22, 22);
-      const z = base.z + this.rng.range(-22, 22);
-      ctx.combat.spawnGuard(x, z, boss && i === 0);
-    }
-  }
-
-  startRace(ctx) {
-    const step = this.mission.steps[this.stepIndex];
-    const rivals = [];
-    const models = ["corto", "vantara", "pipit"];
-    for (let i = 0; i < 3; i++) {
-      const mesh = buildCarMesh(models[i], [0xff2f6d, 0x00c8ff, 0xf1c40f][i]);
-      this.scene.add(mesh);
-      const r = {
-        mesh, x: 31 + (i - 1) * 5, z: -118 + i * 4, heading: -Math.PI / 2,
-        speed: 0, cp: 0, finished: false,
-      };
-      mesh.position.set(r.x, 0, r.z);
-      rivals.push(r);
-    }
-    this.race = { checkpoints: step.checkpoints, rivals, playerCp: 0, startedAt: ctx.now };
+    const s = this.currentStep();
+    if (!s) return;
+    const px = ctx.playerX;
+    const pz = ctx.playerZ;
+    if (s.kind === "enterCar" && ctx.inCar) this.advance(ctx);
+    else if (s.kind === "reach" && Math.hypot(px - s.target[0], pz - s.target[1]) < 7) this.advance(ctx);
+    else if (s.kind === "steal" && ctx.inCar && ctx.carId === "vantara") this.advance(ctx);
+    else if (s.kind === "race") this.updateRace(dt, ctx);
   }
 
   updateRace(dt, ctx) {
-    const race = this.race;
-    if (!race) return;
-    const cps = race.checkpoints;
-    // Player progress.
-    const p = ctx.player;
-    const cp = cps[race.playerCp];
-    if (cp && Math.hypot(p.x - cp.x, p.z - cp.z) < 13) {
-      race.playerCp++;
-      this.waypoint = race.playerCp < cps.length ? { x: cps[race.playerCp].x, z: cps[race.playerCp].z } : null;
-      this.objective = `Checkpoint ${Math.min(race.playerCp + 1, cps.length)}/${cps.length} — stay ahead`;
-      ctx.audio?.pickup();
-    }
-    if (race.playerCp >= cps.length) {
-      ctx.toast("Race won!");
-      this.cleanupRace();
-      this.completeStep(ctx);
-      return;
-    }
-    // Rivals chase their next checkpoint with simple pursuit steering.
-    for (const r of race.rivals) {
-      if (r.finished) continue;
-      const target = cps[r.cp];
-      if (!target) continue;
-      const dx = target.x - r.x;
-      const dz = target.z - r.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 13) {
-        r.cp++;
-        if (r.cp >= cps.length) {
-          r.finished = true;
-          ctx.toast("A rival won the race…");
-          this.failMission(ctx);
-          return;
-        }
-        continue;
+    const target = RACE_POINTS[this.racePoint];
+    if (Math.hypot(ctx.playerX - target[0], ctx.playerZ - target[1]) < 9) {
+      this.racePoint++;
+      if (this.racePoint >= RACE_POINTS.length) {
+        this.advance(ctx);
+        return;
       }
-      const th = Math.atan2(-dz, dx);
-      let dh = th - r.heading;
+      this.setWaypoint(...RACE_POINTS[this.racePoint]);
+      ctx.onToast?.(`Checkpoint ${this.racePoint + 1}/4!`);
+    }
+    // Rivals chase the same checkpoints.
+    for (const r of this.rivals) {
+      if (r.finished) continue;
+      const t = RACE_POINTS[r.racePoint];
+      const dx = t[0] - r.x;
+      const dz = t[1] - r.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 9) {
+        r.racePoint++;
+        if (r.racePoint >= RACE_POINTS.length) { r.finished = true; continue; }
+      }
+      const want = Math.atan2(dx, dz);
+      let dh = want - r.heading;
       while (dh > Math.PI) dh -= Math.PI * 2;
       while (dh < -Math.PI) dh += Math.PI * 2;
-      r.heading += Math.max(-2.6 * dt, Math.min(2.6 * dt, dh));
-      r.speed += (26 - r.speed) * Math.min(1, dt * 1.2);
-      r.x += Math.cos(r.heading) * r.speed * dt;
-      r.z -= Math.sin(r.heading) * r.speed * dt;
+      r.heading += Math.max(-2 * dt, Math.min(2 * dt, dh));
+      r.speed += (24 - r.speed) * Math.min(1, dt);
+      r.x += Math.sin(r.heading) * r.speed * dt;
+      r.z += Math.cos(r.heading) * r.speed * dt;
       r.mesh.position.set(r.x, 0, r.z);
-      r.mesh.rotation.y = r.heading;
-    }
-  }
-
-  // Called every fixed step while a mission is active.
-  update(dt, ctx) {
-    if (!this.active) return;
-    const step = this.mission.steps[this.stepIndex];
-    const p = ctx.player;
-    const dist = (x, z) => Math.hypot(p.x - x, p.z - z);
-    switch (step.kind) {
-      case "goto":
-        if (dist(step.x, step.z) < step.r) this.completeStep(ctx);
-        break;
-      case "enterCar":
-        if (!p.onFoot) this.completeStep(ctx);
-        break;
-      case "deliver":
-        if (!p.onFoot && dist(step.x, step.z) < step.r) this.completeStep(ctx);
-        break;
-      case "stealCar":
-        // The game sets ctx.stolenCar when the player steals the target.
-        if (ctx.stolenCar === step.model) {
-          ctx.stolenCar = null;
-          ctx.police.addWanted(2);
-          this.completeStep(ctx);
-        }
-        break;
-      case "escape":
-        if (ctx.police.stars === 0) this.completeStep(ctx);
-        break;
-      case "sabotage": {
-        const s = this.stepState;
-        if (!s.guardsSpawned) {
-          s.guardsSpawned = true;
-          this.spawnGuards(ctx, 3, false);
-        }
-        const next = step.spots.find((sp) => !s.sabotaged.includes(sp));
-        if (next) {
-          this.waypoint = { x: next.x, z: next.z };
-          this.objective = `Sabotage the containers (${s.sabotaged.length}/3)`;
-          if (dist(next.x, next.z) < 4.5 && ctx.interactPressed) {
-            s.sabotaged.push(next);
-            ctx.effects?.explosion(next.x, next.z, 0.6);
-            ctx.audio?.crash();
-            ctx.toast(`Container sabotaged (${s.sabotaged.length}/3)`);
-          }
-        } else {
-          this.completeStep(ctx);
-        }
-        break;
-      }
-      case "eliminate": {
-        const s = this.stepState;
-        if (!s.guardsSpawned) {
-          s.guardsSpawned = true;
-          this.spawnGuards(ctx, step.count, step.boss);
-          s.total = ctx.combat.aliveCount();
-        }
-        const left = ctx.combat.aliveCount();
-        this.objective = `${step.text} (${s.total - left}/${s.total})`;
-        if (left === 0) this.completeStep(ctx);
-        break;
-      }
-      case "race":
-        if (!this.race) this.startRace(ctx);
-        this.updateRace(dt, ctx);
-        break;
-      default:
-        break;
+      r.mesh.rotation.y = r.heading + Math.PI;
+      const spin = (r.speed * dt) / 0.34;
+      for (const w of r.wheels) w.rotation.x += spin;
     }
   }
 }

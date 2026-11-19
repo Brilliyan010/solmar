@@ -1,155 +1,143 @@
-// Traffic AI: cars drive the road grid on the right-hand lane, stop at red
-// lights, slow for the car ahead, and respawn near the player when they get
-// too far away. Deterministic from the seed.
+// traffic.js — AI traffic cars. Each car drives along a street centre
+// line (x-streets or z-streets), keeps to the right-hand lane, slows for
+// the car ahead, and at intersections sometimes turns onto the cross
+// street. Traffic lights at the four central intersections gate flow.
 import * as THREE from "three";
-import { CFG } from "./config.js";
-import { ROAD_X, ROAD_Z } from "./city.js";
-import { MODELS, buildCarMesh } from "./vehicles.js";
-import { Rng } from "./rng.js";
+import { CONFIG } from "./config.js";
+import { makeRng, pick, range } from "./rng.js";
+import { createCar, carDef } from "./vehicles.js";
+import { nearestStreet } from "./city.js";
 
-const TRAFFIC_MODELS = ["pipit", "corto", "corto", "cabrio", "mule", "pipit", "hauler"];
+const STREETS = CONFIG.streetOffsets;
 
 export class Traffic {
-  constructor(scene, city, seed) {
+  constructor(scene) {
     this.scene = scene;
-    this.city = city;
-    this.rng = new Rng(seed ^ 0x51ab);
     this.cars = [];
-    this.lightTimer = 0;
-    for (let i = 0; i < CFG.trafficCount; i++) {
-      const model = this.rng.pick(TRAFFIC_MODELS);
-      const color = this.rng.pick(MODELS[model].colors);
-      const mesh = buildCarMesh(model, color);
-      scene.add(mesh);
-      const car = {
-        mesh, model, speed: 0,
-        x: 0, z: 0, heading: 0, radius: 2.1,
-        from: null, to: null, t: 0, edgeLen: 1,
-        targetSpeed: CFG.trafficSpeed,
-      };
-      this.placeOnRandomEdge(car, 0, 0, 260);
+    this.rng = makeRng(CONFIG.seed + 101);
+    // Traffic lights: state per central intersection, cycles on a timer.
+    this.lights = [];
+    for (const sx of [-31, 31]) {
+      for (const sz of [-31, 31]) {
+        this.lights.push({ x: sx, z: sz, t: this.rng() * 8, green: this.rng() < 0.5 });
+      }
+    }
+    this.lightMeshes = [];
+    for (const l of this.lights) {
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 4.4, 6),
+        new THREE.MeshLambertMaterial({ color: 0x222222 }),
+      );
+      pole.position.set(l.x + 7.5, 2.2, l.z + 7.5);
+      scene.add(pole);
+      const lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.5, 10, 8),
+        new THREE.MeshBasicMaterial({ color: 0x37d67a }),
+      );
+      lamp.position.set(l.x + 7.5, 4.6, l.z + 7.5);
+      scene.add(lamp);
+      this.lightMeshes.push(lamp);
+    }
+  }
+
+  spawnAll() {
+    const defs = CONFIG.cars.filter((c) => c.id !== "vantara");
+    for (let i = 0; i < CONFIG.trafficCount; i++) {
+      const alongX = this.rng() < 0.5;
+      const street = pick(this.rng, STREETS);
+      const along = range(this.rng, -180, 180);
+      const dir = this.rng() < 0.5 ? 1 : -1;
+      const lane = 3; // right-hand lane offset
+      const x = alongX ? along : street + dir * lane * -1;
+      const z = alongX ? street + dir * lane : along;
+      const def = pick(this.rng, defs);
+      const car = createCar(def, x, z, alongX ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI), { driver: "traffic" });
+      car.axis = alongX ? "x" : "z";
+      car.dir = dir;
+      car.street = street;
+      car.targetSpeed = range(this.rng, 8, CONFIG.trafficSpeed);
+      car.wait = 0;
+      this.scene.add(car.mesh);
       this.cars.push(car);
     }
   }
 
-  randomNode() {
-    return { x: this.rng.pick(ROAD_X), z: this.rng.pick(ROAD_Z) };
-  }
-
-  // Put a car on a random road edge near (cx, cz), within maxDist.
-  placeOnRandomEdge(car, cx, cz, maxDist) {
-    for (let tries = 0; tries < 20; tries++) {
-      const a = this.randomNode();
-      const horiz = this.rng.chance(0.5);
-      const b = { ...a };
-      const step = this.rng.pick([-1, 1]) * CFG.pitch;
-      if (horiz) b.x = a.x + step;
-      else b.z = a.z + step;
-      if (b.x < ROAD_X[0] || b.x > ROAD_X[ROAD_X.length - 1]) continue;
-      if (b.z < ROAD_Z[0] || b.z > ROAD_Z[ROAD_Z.length - 1]) continue;
-      const mx = (a.x + b.x) / 2;
-      const mz = (a.z + b.z) / 2;
-      if (Math.hypot(mx - cx, mz - cz) > maxDist) continue;
-      car.from = a;
-      car.to = b;
-      car.t = this.rng.next();
-      car.edgeLen = Math.abs(b.x - a.x) + Math.abs(b.z - a.z);
-      car.speed = CFG.trafficSpeed * this.rng.range(0.8, 1.1);
-      this.syncMesh(car);
-      return;
-    }
-    car.from = { x: 0, z: -186 };
-    car.to = { x: 0, z: -124 };
-    car.t = 0;
-    car.edgeLen = CFG.pitch;
-    this.syncMesh(car);
-  }
-
-  syncMesh(car) {
-    const dx = car.to.x - car.from.x;
-    const dz = car.to.z - car.from.z;
-    const len = Math.hypot(dx, dz) || 1;
-    const ux = dx / len;
-    const uz = dz / len;
-    // Right-hand lane offset.
-    const ox = -uz * 2.4;
-    const oz = ux * 2.4;
-    car.x = car.from.x + dx * car.t + ox;
-    car.z = car.from.z + dz * car.t + oz;
-    car.heading = Math.atan2(-uz, ux);
-    car.mesh.position.set(car.x, 0, car.z);
-    car.mesh.rotation.y = car.heading;
-    for (const w of car.mesh.userData.wheels) w.rotation.z += (car.speed / 0.36) * 0.016;
-  }
-
-  // Traffic-light state for a node: red when the light's NS axis is green
-  // and this car travels east-west, and vice versa.
-  lightStateAt(x, z, travellingX) {
-    for (const l of this.city.trafficLights) {
-      if (Math.abs(l.x - x) < 4 && Math.abs(l.z - z) < 4) {
-        // nsGreen: north-south has green, east-west must stop.
-        if (travellingX) return l.nsGreen ? "stop" : "go";
-        return l.nsGreen ? "go" : "stop";
+  // Is a light red for a car approaching intersection (x,z) on its axis?
+  redLight(car) {
+    for (let i = 0; i < this.lights.length; i++) {
+      const l = this.lights[i];
+      const d = car.axis === "x" ? Math.abs(car.z - l.z) : Math.abs(car.x - l.x);
+      const along = car.axis === "x" ? car.x - l.x : car.z - l.z;
+      if (d < 7 && Math.abs(along) < 14 && Math.sign(along) === -car.dir) {
+        // Green for the axis whose index parity matches the light phase.
+        const greenForX = l.green;
+        if ((car.axis === "x") !== greenForX) return true;
       }
     }
-    return "go";
+    return false;
   }
 
-  update(dt, playerPos) {
-    // Cycle the lights every 9 seconds.
-    this.lightTimer += dt;
-    if (this.lightTimer > 9) {
-      this.lightTimer = 0;
-      for (const l of this.city.trafficLights) {
-        l.nsGreen = !l.nsGreen;
-        l.red.material.emissiveIntensity = l.nsGreen ? 0.15 : 2.2;
-        l.green.material.emissiveIntensity = l.nsGreen ? 2.2 : 0.15;
-      }
+  update(dt) {
+    for (const l of this.lights) {
+      l.t += dt;
+      if (l.t > 8) { l.t = 0; l.green = !l.green; }
     }
+    this.lightMeshes.forEach((m, i) => {
+      m.material.color.setHex(this.lights[i].green ? 0x37d67a : 0xff3a2a);
+    });
+
     for (const car of this.cars) {
-      // Respawn near the player when far away.
-      if (Math.hypot(car.x - playerPos.x, car.z - playerPos.z) > 280) {
-        this.placeOnRandomEdge(car, playerPos.x, playerPos.z, 200);
-        continue;
-      }
-      let target = CFG.trafficSpeed;
-      // Car ahead on the same edge?
+      // Slow for the car ahead on the same street.
+      let ahead = 99;
       for (const o of this.cars) {
-        if (o === car || o.from !== car.from || o.to !== car.to) continue;
-        if (o.t > car.t && o.t - car.t < 0.16) target = Math.min(target, o.speed);
+        if (o === car || o.axis !== car.axis || o.street !== car.street) continue;
+        const d = car.axis === "x" ? (o.x - car.x) * car.dir : (o.z - car.z) * car.dir;
+        if (d > 0 && d < ahead) ahead = d;
       }
-      // Red light ahead?
-      const dx = car.to.x - car.from.x;
-      const dz = car.to.z - car.from.z;
-      const remain = (1 - car.t) * car.edgeLen;
-      if (remain < 14) {
-        const travellingX = Math.abs(dx) > 0;
-        if (this.lightStateAt(car.to.x, car.to.z, travellingX) === "stop") target = 0;
+      let want = car.targetSpeed;
+      if (ahead < 10) want = Math.min(want, Math.max(0, (ahead - 5) * 1.2));
+      if (this.redLight(car)) want = 0;
+      if (car.wait > 0) { car.wait -= dt; want = 0; }
+
+      car.speed += (want - car.speed) * Math.min(1, dt * 2);
+      const step = car.speed * dt;
+      if (car.axis === "x") car.x += step * car.dir;
+      else car.z += step * car.dir;
+
+      // Reached the city edge: turn around.
+      const pos = car.axis === "x" ? car.x : car.z;
+      if (Math.abs(pos) > 200) {
+        car.dir *= -1;
+        if (car.axis === "x") car.z = car.street - car.dir * 3;
+        else car.x = car.street - car.dir * 3;
+        car.heading = car.axis === "x" ? (car.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (car.dir > 0 ? 0 : Math.PI);
       }
-      car.speed += (target - car.speed) * Math.min(1, dt * 2.2);
-      if (car.speed < 0.05) car.speed = 0;
-      car.t += (car.speed * dt) / car.edgeLen;
-      if (car.t >= 1) {
-        // Pick the next edge: any neighbour except the one we came from.
-        const at = car.to;
-        const prev = car.from;
-        const options = [];
-        for (const nx of [at.x - CFG.pitch, at.x + CFG.pitch]) {
-          if (nx >= ROAD_X[0] && nx <= ROAD_X[ROAD_X.length - 1] && !(nx === prev.x && at.z === prev.z)) {
-            options.push({ x: nx, z: at.z });
-          }
+
+      // At an intersection, sometimes turn onto the cross street.
+      const cross = nearestStreet(car.axis === "x" ? car.x : car.z);
+      const distToCross = Math.abs((car.axis === "x" ? car.x : car.z) - cross);
+      if (distToCross < 0.6 && this.rng() < 0.06 && Math.abs(car.speed) > 3) {
+        const newStreet = cross;
+        const newAxis = car.axis === "x" ? "z" : "x";
+        const newDir = this.rng() < 0.5 ? 1 : -1;
+        const oldStreet = car.street;
+        if (newAxis === "x") {
+          car.z = newStreet + newDir * 3;
+          car.x = oldStreet;
+        } else {
+          car.x = newStreet + newDir * 3;
+          car.z = oldStreet;
         }
-        for (const nz of [at.z - CFG.pitch, at.z + CFG.pitch]) {
-          if (nz >= ROAD_Z[0] && nz <= ROAD_Z[ROAD_Z.length - 1] && !(at.x === prev.x && nz === prev.z)) {
-            options.push({ x: at.x, z: nz });
-          }
-        }
-        car.from = at;
-        car.to = options.length ? this.rng.pick(options) : prev;
-        car.t = 0;
-        car.edgeLen = Math.abs(car.to.x - car.from.x) + Math.abs(car.to.z - car.from.z);
+        car.axis = newAxis;
+        car.dir = newDir;
+        car.street = newStreet;
+        car.heading = newAxis === "x" ? (newDir > 0 ? Math.PI / 2 : -Math.PI / 2) : (newDir > 0 ? 0 : Math.PI);
       }
-      this.syncMesh(car);
+
+      car.mesh.position.set(car.x, 0, car.z);
+      car.mesh.rotation.y = car.heading + Math.PI;
+      const spin = (car.speed * dt) / 0.34;
+      for (const w of car.wheels) w.rotation.x += spin;
     }
   }
 }

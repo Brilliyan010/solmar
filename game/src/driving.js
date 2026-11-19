@@ -1,131 +1,138 @@
-// Arcade driving physics + collisions. Cars are circles in the XZ plane;
-// buildings are AABBs. No physics engine: a few dozen lines of push-out and
-// speed exchange, tuned to feel like a street arcade racer.
-import { CFG } from "./config.js";
+// driving.js — arcade car physics plus the shared circle-vs-AABB
+// collision used by the player, cars and police. No real physics engine:
+// speed, steering that tightens at low speed, handbrake drift, and
+// push-out collisions against buildings, traffic and pedestrians.
+import { CONFIG } from "./config.js";
 
-// Push a circle (x, z, radius r) out of every AABB it overlaps.
-// Returns { x, z, hit } with hit true when any collider was touched.
-export function collideCircleAABB(x, z, r, colliders) {
+// Push a circle (x,z,r) out of every AABB it overlaps. Returns the
+// corrected position and whether any collision happened.
+export function collideCircle(x, z, r, colliders) {
   let hit = false;
   for (const c of colliders) {
-    const cx = Math.max(c.minX, Math.min(x, c.maxX));
-    const cz = Math.max(c.minZ, Math.min(z, c.maxZ));
-    const dx = x - cx;
-    const dz = z - cz;
+    const nx = Math.max(c.minX, Math.min(x, c.maxX));
+    const nz = Math.max(c.minZ, Math.min(z, c.maxZ));
+    const dx = x - nx;
+    const dz = z - nz;
     const d2 = dx * dx + dz * dz;
-    if (d2 >= r * r) continue;
-    hit = true;
-    if (d2 > 1e-6) {
-      const d = Math.sqrt(d2);
-      x = cx + (dx / d) * r;
-      z = cz + (dz / d) * r;
-    } else {
-      // Centre inside the box: push out along the smallest penetration axis.
-      const pl = x - c.minX;
-      const pr = c.maxX - x;
-      const pt = z - c.minZ;
-      const pb = c.maxZ - z;
-      const m = Math.min(pl, pr, pt, pb);
-      if (m === pl) x = c.minX - r;
-      else if (m === pr) x = c.maxX + r;
-      else if (m === pt) z = c.minZ - r;
-      else z = c.maxZ + r;
+    if (d2 < r * r) {
+      hit = true;
+      if (d2 > 1e-6) {
+        const d = Math.sqrt(d2);
+        x = nx + (dx / d) * r;
+        z = nz + (dz / d) * r;
+      } else {
+        // Centre inside the box: push out along the smallest penetration.
+        const pl = x - c.minX + r;
+        const pr = c.maxX - x + r;
+        const pt = z - c.minZ + r;
+        const pb = c.maxZ - z + r;
+        const m = Math.min(pl, pr, pt, pb);
+        if (m === pl) x = c.minX - r;
+        else if (m === pr) x = c.maxX + r;
+        else if (m === pt) z = c.minZ - r;
+        else z = c.maxZ + r;
+      }
     }
   }
-  return { x, z, hit };
+  return [x, z, hit];
 }
 
-// One fixed step of arcade driving. input: { throttle: -1..1, steer: -1..1,
-// handbrake: bool }. others: other cars {x, z, radius, speed} for bumps.
-// Returns an event object the game uses for sound, wanted and damage.
-export function driveCarStep(car, input, dt, colliders, others) {
-  const ev = { hitWall: false, hitCar: false, impact: 0 };
-  const m = car;
-  const speedSign = m.speed >= 0 ? 1 : -1;
-  // Longitudinal.
-  if (input.throttle > 0) m.speed += m.accel * input.throttle * dt;
-  else if (input.throttle < 0) {
-    if (m.speed > 0.5) m.speed -= CFG.driveBrake * dt;
-    else m.speed -= m.accel * 0.7 * dt; // reverse
+export function driveCar(car, dt, input, ctx) {
+  const def = car.def;
+  const k = input.keys;
+  const maxSpeed = CONFIG.carMaxSpeed * def.speed;
+  const accel = CONFIG.carAccel * def.accel;
+  const handbrake = k.has("Space");
+
+  if (k.has("KeyW")) car.speed += accel * dt;
+  else if (k.has("KeyS")) {
+    if (car.speed > 0.5) car.speed -= CONFIG.carBrake * dt;
+    else car.speed -= accel * 0.5 * dt;
+  } else {
+    // Engine drag.
+    car.speed -= car.speed * 0.8 * dt;
   }
-  m.speed -= m.speed * 0.35 * dt; // rolling drag
-  if (input.handbrake) m.speed -= m.speed * 1.4 * dt;
-  if (m.speed > m.maxSpeed) m.speed = m.maxSpeed;
-  if (m.speed < -CFG.driveReverseMax) m.speed = -CFG.driveReverseMax;
-  if (Math.abs(m.speed) < 0.05 && input.throttle === 0) m.speed = 0;
-  // Steering: sharper at low speed, duller at top speed; handbrake slides.
-  const spd = Math.abs(m.speed);
-  const grip = CFG.driveGrip * (input.handbrake ? CFG.handbrakeTurn : 1);
-  const turn = input.steer * grip * Math.min(spd / 7, 1) * (1 - Math.min(spd / m.maxSpeed, 1) * 0.45);
-  m.heading += turn * dt * speedSign;
-  // Integrate.
-  const fx = Math.cos(m.heading);
-  const fz = -Math.sin(m.heading);
-  let nx = m.x + fx * m.speed * dt;
-  let nz = m.z + fz * m.speed * dt;
-  // City bounds: soft wall at the ground edge.
-  const B = 360;
-  nx = Math.max(-B, Math.min(B, nx));
-  nz = Math.max(-B, Math.min(B, nz));
-  const r = (m.mesh?.userData.length ?? 4.4) * 0.42;
-  const col = collideCircleAABB(nx, nz, r, colliders);
-  if (col.hit) {
-    ev.hitWall = true;
-    ev.impact = Math.abs(m.speed);
-    m.speed *= 0.45;
-    m.damage += ev.impact * 0.02;
+  if (handbrake) car.speed -= car.speed * 2.2 * dt;
+  car.speed = Math.max(-CONFIG.carReverseSpeed, Math.min(maxSpeed, car.speed));
+
+  // Steering: stronger at low speed, weaker at full speed; handbrake slides.
+  const steerInput = (k.has("KeyA") ? -1 : 0) + (k.has("KeyD") ? 1 : 0);
+  const steerAmount = steerInput * CONFIG.carTurn * (1 - Math.min(0.55, Math.abs(car.speed) / maxSpeed * 0.55));
+  const grip = handbrake ? CONFIG.handbrakeGrip : CONFIG.carGrip;
+  car.steer += (steerAmount - car.steer) * Math.min(1, dt * grip);
+  const dirSign = car.speed >= 0 ? 1 : -1;
+  car.heading += car.steer * (car.speed / maxSpeed) * dt * 2.4 * dirSign * -1;
+
+  let nx = car.x + Math.sin(car.heading) * car.speed * dt;
+  let nz = car.z + Math.cos(car.heading) * car.speed * dt;
+  // World bounds: bounce softly off the city edge.
+  nx = Math.max(-208, Math.min(208, nx));
+  nz = Math.max(-208, Math.min(208, nz));
+
+  const [cx, cz, hitWall] = collideCircle(nx, nz, 1.6, ctx.colliders);
+  if (hitWall && Math.abs(car.speed) > 4) {
+    ctx.onCrash?.(car, Math.abs(car.speed));
+    car.speed *= 0.45;
+    car.damaged = Math.min(1, car.damaged + Math.abs(car.speed) * 0.004);
   }
-  nx = col.x;
-  nz = col.z;
-  // Car-to-car bumps.
-  for (const o of others) {
-    if (o === m) continue;
-    const dx = nx - o.x;
-    const dz = nz - o.z;
-    const or = o.radius ?? 2;
-    const rr = r + or;
-    const d2 = dx * dx + dz * dz;
-    if (d2 >= rr * rr || d2 < 1e-6) continue;
-    const d = Math.sqrt(d2);
-    const push = (rr - d) / 2;
-    nx += (dx / d) * push;
-    nz += (dz / d) * push;
-    ev.hitCar = true;
-    ev.impact = Math.max(ev.impact, Math.abs(m.speed - (o.speed ?? 0)) * 0.5);
-    m.speed *= 0.6;
-    m.damage += 0.5;
-    if (o.speed !== undefined && o.push) o.push(-(dx / d) * push, -(dz / d) * push);
+  car.x = cx;
+  car.z = cz;
+
+  // Bump into traffic cars: push both, damage both.
+  for (const o of ctx.trafficCars ?? []) {
+    if (o === car) continue;
+    const dx = car.x - o.x;
+    const dz = car.z - o.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 3.4 && d > 0.01) {
+      const push = (3.4 - d) / 2;
+      const ux = dx / d;
+      const uz = dz / d;
+      car.x += ux * push;
+      car.z += uz * push;
+      o.x -= ux * push;
+      o.z -= uz * push;
+      if (Math.abs(car.speed) > 6) {
+        ctx.onCrash?.(car, Math.abs(car.speed));
+        car.speed *= 0.6;
+        o.speed *= 0.5;
+        car.damaged = Math.min(1, car.damaged + 0.08);
+      }
+    }
   }
-  m.x = nx;
-  m.z = nz;
-  if (m.mesh) {
-    m.mesh.position.set(m.x, 0, m.z);
-    m.mesh.rotation.y = m.heading;
-    // Wheel spin + front-wheel steer (visual only).
-    const spin = (m.speed * dt) / 0.36;
-    for (const w of m.mesh.userData.wheels ?? []) w.rotation.z += spin;
+
+  // Pedestrian hits: knock the ped down, scare the crowd, raise wanted.
+  for (const p of ctx.peds ?? []) {
+    const dx = car.x - p.x;
+    const dz = car.z - p.z;
+    if (Math.hypot(dx, dz) < 1.6 && Math.abs(car.speed) > 3) {
+      ctx.onHitPed?.(p);
+      p.x += (dx || 0.1) * 2;
+      p.z += (dz || 0.1) * 2;
+      car.speed *= 0.85;
+    }
   }
-  return ev;
+
+  car.mesh.position.set(car.x, 0, car.z);
+  // The model faces -z (headlights at -z); rotate by heading + PI so its
+  // nose points along the (sin h, cos h) travel direction.
+  car.mesh.rotation.y = car.heading + Math.PI;
+  const spin = (car.speed * dt) / 0.34;
+  for (const w of car.wheels) w.rotation.x += spin;
+  // Front wheels visually steer.
+  car.wheels[0].rotation.y = car.steer * 0.35;
+  car.wheels[1].rotation.y = car.steer * 0.35;
 }
 
-// Resolve a bump between the player's car and a traffic/police car.
-// Returns the impact speed for wanted/sound.
-export function bumpCars(a, b) {
-  const dx = a.x - b.x;
-  const dz = a.z - b.z;
-  const d2 = dx * dx + dz * dz;
-  const rr = 2.1 + 2.1;
-  if (d2 >= rr * rr || d2 < 1e-6) return 0;
-  const d = Math.sqrt(d2);
-  const push = (rr - d) / 2;
-  const ux = dx / d;
-  const uz = dz / d;
-  a.x += ux * push;
-  a.z += uz * push;
-  b.x -= ux * push;
-  b.z -= uz * push;
-  const impact = Math.abs(a.speed - b.speed);
-  a.speed *= 0.6;
-  b.speed *= 0.6;
-  return impact;
+// Third-person chase camera behind a driven car.
+export function chaseCamera(car, camera, dt, camYaw, mode) {
+  const back = mode === 0 ? 9 : 13;
+  const height = mode === 0 ? 3.6 : 5;
+  const tx = car.x - Math.sin(car.heading) * back;
+  const tz = car.z - Math.cos(car.heading) * back;
+  const k = 1 - Math.pow(0.0001, dt); // smooth follow
+  camera.position.x += (tx - camera.position.x) * k;
+  camera.position.y += (height - camera.position.y) * k;
+  camera.position.z += (tz - camera.position.z) * k;
+  camera.lookAt(car.x + Math.sin(car.heading) * 6, 1.2, car.z + Math.cos(car.heading) * 6);
 }

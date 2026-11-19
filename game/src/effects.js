@@ -1,160 +1,138 @@
-// Effects: one pooled THREE.Points particle system (dust, smoke, sparks),
-// muzzle-flash sprites, skid-mark decals and camera shake. Everything is
-// recycled — no allocations in the hot loop.
+// effects.js — particles, muzzle flashes, tracers, blood, smoke and
+// screen shake. One pooled sprite set is reused for every burst so the
+// game never allocates in the hot loop.
 import * as THREE from "three";
-import { Rng } from "./rng.js";
+import { makeRng } from "./rng.js";
 
-const MAX_PARTICLES = 600;
+function dotTexture() {
+  const c = document.createElement("canvas");
+  c.width = 32;
+  c.height = 32;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(16, 16, 2, 16, 16, 16);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.5, "rgba(255,255,255,0.5)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
+}
 
 export class Effects {
-  constructor(scene, seed) {
+  constructor(scene) {
     this.scene = scene;
-    this.rng = new Rng(seed ^ 0xef3c);
-    this.positions = new Float32Array(MAX_PARTICLES * 3);
-    this.colors = new Float32Array(MAX_PARTICLES * 3);
-    this.vel = new Float32Array(MAX_PARTICLES * 3);
-    this.life = new Float32Array(MAX_PARTICLES);
-    this.maxLife = new Float32Array(MAX_PARTICLES);
-    this.grav = new Float32Array(MAX_PARTICLES);
-    this.head = 0;
-    for (let i = 0; i < MAX_PARTICLES; i++) this.positions[i * 3 + 1] = -999;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(this.positions, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(this.colors, 3));
-    // Soft round sprite so particles render as dots, not squares.
-    const cv = document.createElement("canvas");
-    cv.width = 64;
-    cv.height = 64;
-    const g2 = cv.getContext("2d");
-    const grad = g2.createRadialGradient(32, 32, 0, 32, 32, 32);
-    grad.addColorStop(0, "rgba(255,255,255,1)");
-    grad.addColorStop(0.55, "rgba(255,255,255,0.65)");
-    grad.addColorStop(1, "rgba(255,255,255,0)");
-    g2.fillStyle = grad;
-    g2.fillRect(0, 0, 64, 64);
-    const sprite = new THREE.CanvasTexture(cv);
-    const mat = new THREE.PointsMaterial({ size: 0.55, map: sprite, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false });
-    this.points = new THREE.Points(geo, mat);
-    this.points.frustumCulled = false;
-    scene.add(this.points);
-    // Muzzle flash: one additive sprite, reused.
-    this.flash = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.6, 1.6),
-      new THREE.MeshBasicMaterial({ color: 0xffd890, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+    this.rng = makeRng(777);
+    this.tex = dotTexture();
+    this.pool = [];
+    for (let i = 0; i < 90; i++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.tex, transparent: true, depthWrite: false }));
+      s.visible = false;
+      scene.add(s);
+      this.pool.push({ sprite: s, life: 0, max: 1, vx: 0, vy: 0, vz: 0, grav: 0 });
+    }
+    this.tracers = [];
+    this.shake = 0;
+    this.marks = [];
+  }
+
+  spawn(x, y, z, color, n, speed, life, size, grav = -4) {
+    let placed = 0;
+    for (const p of this.pool) {
+      if (placed >= n) break;
+      if (p.life > 0) continue;
+      p.life = life * (0.7 + this.rng() * 0.6);
+      p.max = p.life;
+      const a = this.rng() * Math.PI * 2;
+      const up = this.rng() * 0.9 + 0.2;
+      p.vx = Math.cos(a) * speed * this.rng();
+      p.vz = Math.sin(a) * speed * this.rng();
+      p.vy = up * speed;
+      p.grav = grav;
+      p.sprite.position.set(x, y, z);
+      p.sprite.material.color.setHex(color);
+      p.sprite.material.opacity = 1;
+      p.sprite.scale.setScalar(size);
+      p.sprite.visible = true;
+      placed++;
+    }
+  }
+
+  muzzle(x, y, z) {
+    this.spawn(x, y, z, 0xffe14d, 6, 3, 0.12, 1.6, 0);
+    this.shake = Math.max(this.shake, 0.12);
+  }
+
+  blood(x, y, z) { this.spawn(x, y, z, 0xc02020, 10, 2.5, 0.5, 0.7); }
+  sparks(x, y, z) { this.spawn(x, y, z, 0xffd23e, 12, 5, 0.4, 0.6, -8); }
+  smoke(x, y, z) { this.spawn(x, y, z, 0x666666, 3, 1.2, 1.4, 2.2, 1.2); }
+
+  explosion(x, y, z) {
+    this.spawn(x, y, z, 0xff7a2a, 22, 7, 0.7, 2.4);
+    this.spawn(x, y, z, 0x333333, 10, 3, 1.6, 3.2, 1.5);
+    this.shake = Math.max(this.shake, 0.7);
+  }
+
+  dust(x, z) { this.spawn(x, 0.3, z, 0xb8a888, 2, 1.5, 0.7, 1.4, 0.5); }
+
+  tracer(x1, y1, z1, x2, y2, z2) {
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(x1, y1, z1),
+      new THREE.Vector3(x2, y2, z2),
+    ]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0.9 }));
+    this.scene.add(line);
+    this.tracers.push({ line, life: 0.12 });
+  }
+
+  // Floating diamond marker (sabotage spots, pickups).
+  mark(x, z) {
+    const m = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.8),
+      new THREE.MeshBasicMaterial({ color: 0xffd23e }),
     );
-    scene.add(this.flash);
-    this.flashLife = 0;
-    // Skid marks: pool of fading dark quads.
-    this.skids = [];
-    const skidGeo = new THREE.PlaneGeometry(0.45, 1.4);
-    for (let i = 0; i < 48; i++) {
-      const m = new THREE.Mesh(skidGeo, new THREE.MeshBasicMaterial({ color: 0x141414, transparent: true, opacity: 0, depthWrite: false }));
-      m.rotation.x = -Math.PI / 2;
-      m.position.y = 0.02;
-      scene.add(m);
-      this.skids.push({ mesh: m, life: 0 });
+    m.position.set(x, 2.4, z);
+    this.scene.add(m);
+    this.marks.push({ mesh: m, baseY: 2.4, t: this.rng() * 6 });
+    return m;
+  }
+
+  addShake(n) { this.shake = Math.max(this.shake, n); }
+
+  update(dt, time) {
+    for (const p of this.pool) {
+      if (p.life <= 0) continue;
+      p.life -= dt;
+      if (p.life <= 0) { p.sprite.visible = false; continue; }
+      p.vy += p.grav * dt;
+      p.sprite.position.x += p.vx * dt;
+      p.sprite.position.y += p.vy * dt;
+      p.sprite.position.z += p.vz * dt;
+      p.sprite.material.opacity = p.life / p.max;
     }
-    this.skidHead = 0;
-    this.shakeAmt = 0;
-  }
-
-  spawn(x, y, z, count, color, speed, life, gravity, spread = 1) {
-    const col = new THREE.Color(color);
-    for (let n = 0; n < count; n++) {
-      const i = this.head;
-      this.head = (this.head + 1) % MAX_PARTICLES;
-      this.positions[i * 3] = x;
-      this.positions[i * 3 + 1] = y;
-      this.positions[i * 3 + 2] = z;
-      const a = this.rng.next() * Math.PI * 2;
-      const s = speed * (0.4 + this.rng.next() * 0.8);
-      this.vel[i * 3] = Math.cos(a) * s * spread;
-      this.vel[i * 3 + 1] = this.rng.range(0.2, 1) * speed * 0.7;
-      this.vel[i * 3 + 2] = Math.sin(a) * s * spread;
-      this.colors[i * 3] = col.r;
-      this.colors[i * 3 + 1] = col.g;
-      this.colors[i * 3 + 2] = col.b;
-      this.life[i] = life * (0.6 + this.rng.next() * 0.7);
-      this.maxLife[i] = this.life[i];
-      this.grav[i] = gravity;
-    }
-  }
-
-  dust(x, z) {
-    this.spawn(x, 0.3, z, 3, 0xcbb89a, 1.6, 0.9, -0.4, 1);
-  }
-
-  smoke(x, y, z) {
-    this.spawn(x, y, z, 6, 0x555555, 1.2, 1.6, 0.8, 0.8);
-  }
-
-  sparks(x, y, z) {
-    this.spawn(x, y, z, 10, 0xffa030, 7, 0.5, -6, 1);
-  }
-
-  explosion(x, z, scale = 1) {
-    this.spawn(x, 1, z, Math.round(26 * scale), 0xff7a20, 8 * scale, 0.8, 2, 1);
-    this.spawn(x, 1.5, z, Math.round(16 * scale), 0x444444, 3 * scale, 2.2, 1.5, 1);
-    this.shake(0.5 * scale);
-  }
-
-  muzzle(pos, dir) {
-    this.flash.position.copy(pos).addScaledVector(dir, 0.9);
-    this.flash.lookAt(pos.clone().addScaledVector(dir, 3));
-    this.flashLife = 0.07;
-    this.flash.material.opacity = 0.95;
-  }
-
-  skid(x, z, heading) {
-    const s = this.skids[this.skidHead];
-    this.skidHead = (this.skidHead + 1) % this.skids.length;
-    s.mesh.position.set(x, 0.02, z);
-    s.mesh.rotation.z = -heading;
-    s.life = 4;
-    s.mesh.material.opacity = 0.55;
-  }
-
-  shake(amount) {
-    this.shakeAmt = Math.max(this.shakeAmt, amount);
-  }
-
-  shakeOffset() {
-    if (this.shakeAmt <= 0.001) return { x: 0, y: 0 };
-    return {
-      x: (this.rng.next() - 0.5) * this.shakeAmt * 0.5,
-      y: (this.rng.next() - 0.5) * this.shakeAmt * 0.5,
-    };
-  }
-
-  update(dt) {
-    for (let i = 0; i < MAX_PARTICLES; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      if (this.life[i] <= 0) {
-        this.positions[i * 3 + 1] = -999;
-        continue;
-      }
-      this.vel[i * 3 + 1] -= this.grav[i] * dt;
-      this.positions[i * 3] += this.vel[i * 3] * dt;
-      this.positions[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
-      this.positions[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      if (this.positions[i * 3 + 1] < 0.05) {
-        this.positions[i * 3 + 1] = 0.05;
-        this.vel[i * 3 + 1] = 0;
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const t = this.tracers[i];
+      t.life -= dt;
+      if (t.life <= 0) {
+        this.scene.remove(t.line);
+        t.line.geometry.dispose();
+        t.line.material.dispose();
+        this.tracers.splice(i, 1);
+      } else {
+        t.line.material.opacity = t.life / 0.12;
       }
     }
-    this.points.geometry.attributes.position.needsUpdate = true;
-    this.points.geometry.attributes.color.needsUpdate = true;
-    if (this.flashLife > 0) {
-      this.flashLife -= dt;
-      this.flash.material.opacity = Math.max(0, this.flashLife / 0.07) * 0.95;
+    for (const m of this.marks) {
+      m.t += dt;
+      m.mesh.rotation.y += dt * 2;
+      m.mesh.position.y = m.baseY + Math.sin(m.t * 3) * 0.3;
     }
-    for (const s of this.skids) {
-      if (s.life > 0) {
-        s.life -= dt;
-        s.mesh.material.opacity = Math.max(0, s.life / 4) * 0.55;
-      }
-    }
-    this.shakeAmt = Math.max(0, this.shakeAmt - dt * 1.6);
+    this.shake = Math.max(0, this.shake - dt * 1.6);
+  }
+
+  applyShake(camera) {
+    if (this.shake <= 0) return;
+    const s = this.shake * 0.5;
+    camera.position.x += (this.rng() - 0.5) * s;
+    camera.position.y += (this.rng() - 0.5) * s;
   }
 }

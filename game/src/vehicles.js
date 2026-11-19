@@ -1,113 +1,145 @@
-// SOLMAR vehicles: six original cars, built procedurally from boxes and
-// cylinders so no model file is needed. Each model has its own proportions,
-// handling and colour. The same factory builds the player's cars, traffic
-// and police cruisers (police get their own livery).
+// vehicles.js — procedural car models. Every car is built from boxes and
+// cylinders in three.js, so no model files are needed. Six original
+// models, each with its own silhouette, plus a police cruiser variant.
 import * as THREE from "three";
+import { CONFIG } from "./config.js";
 
-export const MODELS = {
-  pipit: { name: "Pipit", len: 3.6, wid: 1.7, hgt: 1.35, maxSpeed: 26, accel: 15, price: 900, colors: [0xe74c3c, 0x3498db, 0xf1c40f, 0x9b59b6] },
-  corto: { name: "Corto", len: 4.4, wid: 1.85, hgt: 1.4, maxSpeed: 30, accel: 16, price: 2400, colors: [0x2c3e50, 0xc0c0c0, 0x7f8c8d, 0x1a5276] },
-  cabrio: { name: "Cabrio Taxi", len: 4.4, wid: 1.85, hgt: 1.45, maxSpeed: 28, accel: 15, price: 0, colors: [0xf7c600] },
-  mule: { name: "Mule", len: 5.0, wid: 2.0, hgt: 2.1, maxSpeed: 24, accel: 12, price: 3200, colors: [0xeeeeee, 0x5d6d7e, 0x935116] },
-  vantara: { name: "Vantara", len: 4.3, wid: 1.95, hgt: 1.15, maxSpeed: 40, accel: 20, price: 18000, colors: [0xff2f6d, 0x111111, 0x00c8ff] },
-  hauler: { name: "Hauler", len: 6.4, wid: 2.3, hgt: 2.6, maxSpeed: 22, accel: 11, price: 6500, colors: [0x922b21, 0x1e8449, 0x2e4053] },
-  police: { name: "Interceptor", len: 4.5, wid: 1.9, hgt: 1.42, maxSpeed: 34, accel: 19, price: 0, colors: [0xf2f3f4] },
-};
-
-const paintMat = (color) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.55 });
-const glassMat = new THREE.MeshStandardMaterial({ color: 0x18242e, roughness: 0.15, metalness: 0.7 });
-const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
-const lightFrontMat = new THREE.MeshStandardMaterial({ color: 0xfff6c0, emissive: 0xffedb0, emissiveIntensity: 1.4 });
-const lightRearMat = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xdd1111, emissiveIntensity: 1.2 });
-
-export function buildCarMesh(modelKey, colorOverride) {
-  const m = MODELS[modelKey];
-  const color = colorOverride ?? m.colors[0];
-  const g = new THREE.Group();
-  g.name = `car-${modelKey}`;
-  const L = m.len;
-  const W = m.wid;
-  const H = m.hgt;
-  const paint = paintMat(color);
-
-  // Body + cabin. Low-poly but shaped: a lower body box, a cabin box, and a
-  // hood/trunk slope suggested by a second box on sports models.
-  const body = new THREE.Mesh(new THREE.BoxGeometry(L, H * 0.55, W), paint);
-  body.position.y = H * 0.42;
-  body.castShadow = true;
-  g.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(L * 0.5, H * 0.42, W * 0.88), modelKey === "mule" || modelKey === "hauler" ? paint : glassMat);
-  cabin.position.set(-L * 0.05, H * 0.55 + H * 0.21, 0);
-  cabin.castShadow = true;
-  g.add(cabin);
-  if (modelKey === "vantara") {
-    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.07, W * 0.95), darkMat);
-    spoiler.position.set(-L * 0.48, H * 0.78, 0);
-    g.add(spoiler);
-    const skirt = new THREE.Mesh(new THREE.BoxGeometry(L * 0.9, 0.12, W * 1.02), darkMat);
-    skirt.position.y = 0.14;
-    g.add(skirt);
-  }
-  if (modelKey === "hauler") {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(L * 0.55, H * 0.9, W * 0.96), new THREE.MeshStandardMaterial({ color: 0xd5d8dc, roughness: 0.6, metalness: 0.3 }));
-    box.position.set(-L * 0.2, H * 0.75, 0);
-    box.castShadow = true;
-    g.add(box);
-  }
-  if (modelKey === "cabrio") {
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.9), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xf7c600, emissiveIntensity: 0.9 }));
-    sign.position.set(-L * 0.05, H * 1.02, 0);
-    g.add(sign);
-  }
-  if (modelKey === "police") {
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(L * 0.98, 0.3, W * 1.01), darkMat);
-    stripe.position.y = H * 0.42;
-    g.add(stripe);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 1.1), new THREE.MeshStandardMaterial({ color: 0x223344, emissive: 0x2255ff, emissiveIntensity: 1.2 }));
-    bar.position.set(-L * 0.05, H * 1.0, 0);
-    g.add(bar);
-    g.userData.lightBar = bar;
-  }
-
-  // Wheels.
-  const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.28, 12);
-  wheelGeo.rotateX(Math.PI / 2);
-  const wheels = [];
-  for (const [wx, wz] of [[L * 0.32, W / 2], [L * 0.32, -W / 2], [-L * 0.32, W / 2], [-L * 0.32, -W / 2]]) {
-    const wheel = new THREE.Mesh(wheelGeo, darkMat);
-    wheel.position.set(wx, 0.36, wz);
-    wheel.castShadow = true;
-    g.add(wheel);
-    wheels.push(wheel);
-  }
-  // Headlights + taillights.
-  for (const wz of [-W * 0.32, W * 0.32]) {
-    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.34), lightFrontMat);
-    hl.position.set(L / 2 + 0.01, H * 0.45, wz);
-    g.add(hl);
-    const tl = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.16, 0.34), lightRearMat);
-    tl.position.set(-L / 2 - 0.01, H * 0.45, wz);
-    g.add(tl);
-  }
-  g.userData.wheels = wheels;
-  g.userData.model = modelKey;
-  g.userData.length = L;
-  g.userData.width = W;
-  return g;
+export function carDef(id) {
+  return CONFIG.cars.find((c) => c.id === id);
 }
 
-// A fresh arcade driving state for one car.
-export function makeCarState(modelKey, x, z, heading) {
-  const m = MODELS[modelKey];
+function box(w, h, d, color, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshLambertMaterial({ color }),
+  );
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  return m;
+}
+
+function wheel(x, z) {
+  const w = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.34, 0.26, 12),
+    new THREE.MeshLambertMaterial({ color: 0x141414 }),
+  );
+  w.rotation.z = Math.PI / 2;
+  w.position.set(x, 0.34, z);
+  return w;
+}
+
+// Build a car mesh for a definition. Returns { group, wheels, bodyMat }.
+// The group faces -z when heading = 0 (three.js forward), matching the
+// driving code, which rotates the group by its heading.
+export function makeCarMesh(def, opts = {}) {
+  const g = new THREE.Group();
+  const color = opts.color ?? def.color;
+  const kind = def.kind;
+  const bodyMat = new THREE.MeshLambertMaterial({ color });
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x1a2a3a });
+
+  let bodyLen = 4.2;
+  let bodyW = 1.9;
+  let bodyH = 0.62;
+  if (kind === "van" || kind === "truck") { bodyLen = 5.0; bodyW = 2.0; bodyH = 0.9; }
+  if (kind === "sport") { bodyLen = 4.4; bodyW = 2.0; bodyH = 0.5; }
+  if (kind === "hatch") { bodyLen = 3.6; bodyW = 1.8; bodyH = 0.66; }
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, bodyLen), bodyMat);
+  body.position.y = 0.62;
+  body.castShadow = true;
+  g.add(body);
+
+  // Cabin / cargo.
+  if (kind === "van" || kind === "truck") {
+    const cargo = box(bodyW - 0.1, 1.5, bodyLen * 0.55, color, 0, 1.75, 0.7);
+    g.add(cargo);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(bodyW - 0.2, 0.9, 1.1), glassMat);
+    cab.position.set(0, 1.35, -1.7);
+    g.add(cab);
+  } else {
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(bodyW - 0.3, 0.55, bodyLen * 0.45), glassMat);
+    cabin.position.set(0, 1.18, kind === "sport" ? 0.25 : 0.1);
+    cabin.castShadow = true;
+    g.add(cabin);
+  }
+
+  // Sport spoiler, taxi sign, truck bed rails.
+  if (kind === "sport") {
+    g.add(box(1.9, 0.07, 0.35, 0x141414, 0, 1.25, 2.05));
+    g.add(box(0.1, 0.3, 0.1, 0x141414, -0.8, 1.05, 2.05));
+    g.add(box(0.1, 0.3, 0.1, 0x141414, 0.8, 1.05, 2.05));
+  }
+  if (kind === "taxi") {
+    const sign = box(0.7, 0.22, 0.4, 0xffc21a, 0, 1.62, 0);
+    sign.material = new THREE.MeshBasicMaterial({ color: 0xffe14d });
+    g.add(sign);
+  }
+
+  // Headlights (warm) and taillights (red), always on at golden hour.
+  const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+  for (const sx of [-1, 1]) {
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.06), headMat);
+    h.position.set(sx * (bodyW / 2 - 0.35), 0.66, -bodyLen / 2 - 0.02);
+    g.add(h);
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.06), tailMat);
+    t.position.set(sx * (bodyW / 2 - 0.35), 0.66, bodyLen / 2 + 0.02);
+    g.add(t);
+  }
+
+  const wheels = [];
+  const wz = bodyLen / 2 - 0.75;
+  const wx = bodyW / 2 - 0.05;
+  for (const [x, z] of [[-wx, -wz], [wx, -wz], [-wx, wz], [wx, wz]]) {
+    const w = wheel(x, z);
+    g.add(w);
+    wheels.push(w);
+  }
+
+  // Police light bar for cruisers.
+  let lightBar = null;
+  if (opts.police) {
+    lightBar = new THREE.Group();
+    const red = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.16, 0.3),
+      new THREE.MeshBasicMaterial({ color: 0xff2020 }),
+    );
+    red.position.x = -0.3;
+    const blue = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.16, 0.3),
+      new THREE.MeshBasicMaterial({ color: 0x2040ff }),
+    );
+    blue.position.x = 0.3;
+    lightBar.add(red);
+    lightBar.add(blue);
+    lightBar.position.set(0, 1.5, 0);
+    lightBar.userData.red = red;
+    lightBar.userData.blue = blue;
+    g.add(lightBar);
+  }
+
+  return { group: g, wheels, bodyMat, lightBar };
+}
+
+// A parked / drivable car entity in the world.
+export function createCar(def, x, z, heading = 0, opts = {}) {
+  const { group, wheels, bodyMat, lightBar } = makeCarMesh(def, opts);
+  group.position.set(x, 0, z);
+  group.rotation.y = heading;
   return {
-    model: modelKey,
-    x, z, heading,
+    def,
+    mesh: group,
+    wheels,
+    bodyMat,
+    lightBar,
+    x,
+    z,
+    heading,
     speed: 0,
     steer: 0,
-    maxSpeed: m.maxSpeed,
-    accel: m.accel,
-    damage: 0,
-    mesh: null,
+    damaged: 0, // 0..1, smoke above 0.6
+    owned: !!opts.owned, // player's own (garage) car
+    driver: opts.driver ?? null, // "player" | "traffic" | "police" | null (parked)
   };
 }
